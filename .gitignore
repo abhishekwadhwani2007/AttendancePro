@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+venv/
+env/
+face_dataset/*.npy
+face_dataset/*.jpg
+face_dataset/*.png
+.vscode/
+.idea/
+.env
