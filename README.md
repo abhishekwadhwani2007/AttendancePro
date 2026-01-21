@@ -25,11 +25,13 @@ The system is designed to automate the old-school attendance process.
 
 ## 🚀 How to Run It on Your PC
 
-**1. Clone this repo**
+**Clone this repo**
 ```bash
 git clone [https://github.com/yourusername/face-attendance-system.git](https://github.com/yourusername/face-attendance-system.git)
 cd face-attendance-system
 
 Install the libraries I have listed everything you need in requirements.txt
 Using: pip install -r requirements.txt
+
+Run main.py
 
