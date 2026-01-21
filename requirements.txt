@@ -1,0 +1,6 @@
+opencv-python
+numpy
+pyttsx3
+mysql-connector-python
+requests
+python-dotenv
