@@ -5,6 +5,10 @@ env/
 face_dataset/*.npy
 face_dataset/*.jpg
 face_dataset/*.png
+*.db                 
+.env                 
 .vscode/
+build/
+dist/
+*.spec
 .idea/
-.env

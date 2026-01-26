@@ -1,6 +1,7 @@
-opencv-python
 numpy
+opencv-python
 pyttsx3
-mysql-connector-python
-requests
-python-dotenv
+customtkinter
+matplotlib
+packaging
+pillow
