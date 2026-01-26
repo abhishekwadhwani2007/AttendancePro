@@ -92,4 +92,4 @@ Bash
 python main.py
 Note: The database (attendance.db) will be created automatically on the first run.
 
-<div align="center"> Made with ❤️ by Abhishek Wadhwani </div>
+Made with ❤️ by Abhishek Wadhwani
