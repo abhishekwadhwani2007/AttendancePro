@@ -59,33 +59,17 @@ AttendancePro became my personal playground for learning Python and AI fundament
 
 ## 🧩 The Logic Behind the Magic
 
-AttendancePro is designed as a **centralized workflow-based system**.  
-When the application launches, the user is taken directly to the **Dashboard**, from where all major actions branch out.
-
-```mermaid
+``` mermaid
 graph TD
-    Start((Launch App)) --> Dash[🏠 Dashboard: Live Stats]
-
+    Start((Launch App)) --> Dash[🏠 Dashboard]
     Dash --> Nav{User Action}
-
-    %% Student Registration
-    Nav -- Add Student --> Form[📝 Enter Student Details]
-    Form --> Cam1[📸 Capture Face Samples]
-    Cam1 --> Train[⚙️ Train Recognition Model (KNN)]
-    Train --> Save[(💾 Save Data to Database)]
-
-    %% Attendance Process
-    Nav -- Take Attendance --> Cam2[📹 Open Webcam]
+    Nav -- Add Student --> Form[📝 Enter Details]
+    Form --> Cam1[📸 Capture Face]
+    Cam1 --> Train[⚙️ Train Model]
+    Train --> Save[(💾 Save to DB)]
+    Nav -- Take Attendance --> Cam2[📹 Webcam]
     Cam2 --> Detect{Face Detected?}
-    Detect -- Yes --> Recog{Known Student?}
-    Recog -- Yes --> Check{Marked Today?}
-    Check -- No --> Log[✅ Mark Attendance]
-    Log --> Speak[🔊 Voice Confirmation]
-    Speak --> Update[📊 Update Dashboard]
-
-    %% Reports
-    Nav -- View Reports --> Table[📄 Attendance History]
-    Table --> Export[📂 Export as CSV]
+    Detect -- Yes --> Log[✅ Mark Attendance]
 ```
 
 ---
