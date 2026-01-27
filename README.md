@@ -45,6 +45,34 @@ The biggest change is the shift from a basic script to a professional software a
 * **No Setup DB:** Switched to **SQLite** so the app works instantly without installing a separate SQL server.
 * **Modular Code:** Split the spaghetti code into `frontend.py`, `backend.py`, and `db_logic.py` for easier maintenance.
 
+## 🧠 Workflow
+The app is designed as a central hub. When you launch it, you land immediately on the **Dashboard** to get a quick summary. From there, the workflow branches out based on what you want to do.
+
+```mermaid
+    Start((Launch App)) --> Dash[🏠 Dashboard: View Live Stats];
+    
+    Dash --> Nav{User Action};
+    
+    Branch 1: Student Management
+    Nav -- "Add Student" --> Form[📝 Enter Details];
+    Form --> Cam1[📸 Capture Face Samples];
+    Cam1 --> Train[🧠 Train Model (KNN)];
+    Train --> Save1[(💾 Save to DB)];
+
+    Branch 2: Attendance System
+    Nav -- "Take Attendance" --> Cam2[📹 Open Webcam];
+    Cam2 --> Detect{Face Detected?};
+    Detect -- Yes --> Recog{Known Student?};
+    
+    Recog -- Yes --> Check{Marked Today?};
+    Check -- No --> Log[✅ Log Attendance];
+    Log --> Speak[🗣️ Voice Feedback];
+    Speak --> Update[📊 Update Dashboard];
+    
+    Branch 3: Reports
+    Nav -- "View Reports" --> Table[📄 View History];
+    Table --> Export[📂 Export to CSV];
+
 ## 📂 Project Structure
 ```text
 AttendancePro/
