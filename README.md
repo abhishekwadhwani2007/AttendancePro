@@ -102,6 +102,50 @@ AttendancePro/
 
 ---
 
+## 🗄️ Database ER Diagram
+
+```mermaid
+erDiagram
+    CLASSES {
+        INTEGER id PK
+        TEXT name
+        TEXT description
+        TEXT created_at
+    }
+
+    STUDENTS {
+        INTEGER id PK
+        INTEGER grno
+        INTEGER rollno
+        TEXT name
+        INTEGER std
+        TEXT section
+        TEXT gender
+        TEXT phoneno
+        TEXT photo_path
+        INTEGER class_id FK
+        TEXT created_at
+    }
+
+    ATTENDANCE {
+        INTEGER id PK
+        INTEGER student_id FK
+        TEXT date
+        TEXT time
+        TEXT status
+    }
+
+    SETTINGS {
+        TEXT key PK
+        TEXT value
+    }
+
+    CLASSES ||--o{ STUDENTS : "has"
+    STUDENTS ||--o{ ATTENDANCE : "logs"
+```
+
+---
+
 ## 💡 Key Features
 
 - 🎯 **Face Recognition System** using OpenCV (Haar Cascades + KNN)

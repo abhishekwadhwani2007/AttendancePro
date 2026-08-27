@@ -128,62 +128,125 @@ def load_face_data():
 def record_face(name, samples=50):
     speak(f"Recording face for {name}")
     
+    cap = None
+    window_name = f"Capturing Face - {name}"
     try:
         cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            print("Error: Cannot open camera")
+            return False
+            
         face_cascade = cv2.CascadeClassifier(HAARCASCADE_PATH)
         face_data = []
         skip = 0
+        saved = False
         
         while True:
             ret, frame = cap.read()
             if not ret:
                 continue
             
+            h_frame, w_frame = frame.shape[:2]
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             faces = face_cascade.detectMultiScale(gray, 1.3, 6)
             
-            if len(faces) == 0:
-                cv2.putText(frame, "No face detected", (50, 50),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                cv2.imshow("Capturing Face - Press Q when done", frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-                continue
-            
-            faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
-            x, y, w, h = faces[0] #Using [:1] to handle one face at a time
-            #Padding
-            offset = 5
-            
-            face_section = frame[max(y - offset, 0): y + h + offset,
-                                max(x - offset, 0): x + w + offset]
-            face_selection = cv2.resize(face_section, (100, 100))
-            
-            if skip % 5 == 0:
-                face_data.append(face_selection)
-            
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv2.putText(frame, f"Captured: {len(face_data)}/{samples}", (50, 50),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.imshow("Capturing Face - Press Q when done", frame)
+            if len(faces) > 0:
+                faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
+                x, y, w, h = faces[0]  # Using [:1] to handle one face at a time
+                offset = 5
+                
+                face_section = frame[max(y - offset, 0): y + h + offset,
+                                    max(x - offset, 0): x + w + offset]
+                if face_section.size > 0:
+                    face_selection = cv2.resize(face_section, (100, 100))
+                    
+                    if skip % 3 == 0 and len(face_data) < samples:
+                        face_data.append(face_selection)
+                    
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                    cv2.putText(frame, name, (x, max(y - 10, 20)),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            else:
+                cv2.putText(frame, "No face detected - Look at camera", (20, 110),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             
             skip += 1
             
-            if cv2.waitKey(1) & 0xFF == ord('q') and len(face_data) > 20:
+            # --- Top Header Overlay ---
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (0, 0), (w_frame, 80), (20, 20, 20), -1)
+            cv2.rectangle(overlay, (0, h_frame - 60), (w_frame, h_frame), (20, 20, 20), -1)
+            cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
+            
+            # Header text
+            cv2.putText(frame, f"Student: {name}", (15, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            
+            # Progress text and bar
+            progress_pct = min(1.0, len(face_data) / max(1, samples))
+            cv2.putText(frame, f"Samples: {len(face_data)}/{samples}", (15, 65),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            
+            bar_x = 220
+            bar_y = 48
+            bar_w = 200
+            bar_h = 18
+            cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (80, 80, 80), -1)
+            cv2.rectangle(frame, (bar_x, bar_y), (bar_x + int(bar_w * progress_pct), bar_y + bar_h), (0, 255, 0), -1)
+            cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (200, 200, 200), 1)
+
+            # Footer / Controls text
+            if len(face_data) >= samples:
+                cv2.putText(frame, "Target reached! Saving automatically...", (15, h_frame - 22),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.imshow(window_name, frame)
+                cv2.waitKey(400)
+                saved = True
                 break
+            else:
+                cv2.putText(frame, "Press 'S' to Save early | 'Q' to Cancel", (15, h_frame - 22),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+
+            cv2.imshow(window_name, frame)
+            
+            key = cv2.waitKey(1) & 0xFF
+            
+            if key == ord('s') and len(face_data) > 0:  # S = save with whatever we have so far
+                saved = True
+                break
+            elif key == ord('q'):  # Q = cancel, don't save
+                saved = False
+                break
+                
+            # Window close button 'X' clicked
+            try:
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                    if len(face_data) > 0:
+                        saved = True
+                    break
+            except Exception:
+                pass
         
-        face_data = np.array(face_data).reshape((len(face_data), -1)) # flatten makes this [[1],[2]] to [1, 2]
-        np.save(os.path.join(DATASET_DIR, name), face_data)
-        
-        cap.release()
-        cv2.destroyAllWindows()
-        
-        speak("Face data saved successfully")
-        return True
-        
+        if saved and len(face_data) > 0:
+            face_array = np.array(face_data).reshape((len(face_data), -1))
+            np.save(os.path.join(DATASET_DIR, name), face_array)
+            speak("Face data saved successfully")
+            return True
+        else:
+            if len(face_data) == 0:
+                speak("No face samples captured")
+            else:
+                speak("Face capture cancelled")
+            return False
+            
     except Exception as e:
         print(f"Error recording face: {str(e)}")
         return False
+    finally:
+        if cap is not None:
+            cap.release()
+        cv2.destroyAllWindows()
+        cv2.waitKey(1)
 
 def recognize_and_mark_attendance(db_module):
     loaded = load_face_data()
@@ -198,6 +261,7 @@ def recognize_and_mark_attendance(db_module):
     speak("Starting face recognition")
     
     cap = None
+    window_name = "AttendancePro - Face Recognition"
     try:
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
@@ -209,6 +273,7 @@ def recognize_and_mark_attendance(db_module):
         matched_name = None
         last_marked = None
         status_message = ""
+        status_color = (0, 255, 0)
         message_timer = 0
         
         while True:
@@ -216,13 +281,13 @@ def recognize_and_mark_attendance(db_module):
             if not ret:
                 continue
             
+            h_frame, w_frame = frame.shape[:2]
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             faces = face_cascade.detectMultiScale(gray, 1.3, 6)
             
             matched_name = None
             
             for (x, y, w, h) in faces:
-                #Padding
                 offset = 5
                 face_section = frame[max(y-offset, 0): y+h+offset,
                                     max(x-offset, 0): x+w+offset]
@@ -231,60 +296,86 @@ def recognize_and_mark_attendance(db_module):
                     continue
                 
                 face_section = cv2.resize(face_section, (100, 100))
-                out = knn(trainset, face_section.flatten()) #knn function will compare the detected face's features with the training data (trainset) and return the predicted label and flatten makes this [[1],[2]] to [1, 2] 
-                candidate_name = names[int(out)]
+                out = knn(trainset, face_section.flatten())
+                candidate_name = names.get(int(out), "Unknown")
                 
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.putText(frame, candidate_name, (x, y - 10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                cv2.putText(frame, candidate_name, (x, max(y - 10, 20)),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
                 
                 matched_name = candidate_name
             
-            cv2.putText(frame, "Press 'N' to mark | 'Q' to quit", (10, 30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            # --- Top & Bottom Overlays ---
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (0, 0), (w_frame, 80), (20, 20, 20), -1)
+            cv2.rectangle(overlay, (0, h_frame - 60), (w_frame, h_frame), (20, 20, 20), -1)
+            cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
             
-            cv2.putText(frame, f"Marked: {len(marked_students)}", (10, 60),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            # Top stats
+            cv2.putText(frame, f"Attendance Mode | Marked: {len(marked_students)}", (15, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)
+            
+            detected_str = f"Detected: {matched_name}" if matched_name else "Scanning for face..."
+            detected_col = (0, 255, 0) if matched_name else (200, 200, 200)
+            cv2.putText(frame, detected_str, (15, 65),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, detected_col, 2)
             
             if last_marked:
-                cv2.putText(frame, f"Last: {last_marked}", (10, 90),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                cv2.putText(frame, f"Last: {last_marked}", (w_frame - 260, 30),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
             
+            # Message banner
             if status_message and message_timer > 0:
-                cv2.putText(frame, status_message, (10, frame.shape[0] - 20),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                cv2.putText(frame, status_message, (15, h_frame - 75),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
                 message_timer -= 1
             
-            cv2.imshow("Face Recognition", frame)
+            # Bottom control instructions
+            cv2.putText(frame, "Press 'M' to Mark Present | 'Q' to Exit", (15, h_frame - 22),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+            
+            cv2.imshow(window_name, frame)
             
             key = cv2.waitKey(1) & 0xFF
             
-            if key == ord('n') and matched_name:
+            # M = mark attendance
+            if key == ord('m') and matched_name:
                 student = db_module.get_student_by_name(matched_name)
                 
                 if student:
                     student_id = student[0]
                     
                     if not db_module.check_attendance_exists(student_id, current_date):
+                        current_time = datetime.datetime.now().strftime("%H:%M:%S")
                         db_module.mark_attendance(student_id, current_date, current_time, "P")
                         speak(f"{matched_name} marked present")
                         marked_students.append(matched_name)
                         last_marked = matched_name
-                        status_message = f"SUCCESS: {matched_name} marked!"
+                        status_message = f"SUCCESS: {matched_name} marked present!"
+                        status_color = (0, 255, 0)
                         message_timer = 90
                         print(f"✓ {matched_name} marked present at {current_time}")
                     else:
                         speak(f"{matched_name} already marked")
                         status_message = f"ALREADY MARKED: {matched_name}"
+                        status_color = (0, 165, 255)
                         message_timer = 90
                         print(f"! {matched_name} already marked today")
                 else:
-                    status_message = f"ERROR: {matched_name} not in database"
+                    status_message = f"ERROR: {matched_name} not found in database"
+                    status_color = (0, 0, 255)
                     message_timer = 90
                     print(f"✗ Student {matched_name} not found in database")
             
+            # Q = quit
             if key == ord('q'):
                 break
+                
+            try:
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                    break
+            except Exception:
+                pass
         
         print(f"\nTotal marked: {len(marked_students)}")
         if marked_students:
