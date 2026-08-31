@@ -73,22 +73,49 @@ def get_camera_index():
     return 0
 
 
+# ── Text-to-Speech ─────────────────────────────────────────────────────────────
+# Preferred voice: Microsoft Zira (soft, clear female voice on Windows).
+# We reinitialise properties inside speak() to avoid the Windows SAPI5 bug
+# where properties set at module load are silently ignored on first use.
+
+_PREFERRED_VOICE_KEYWORD = "zira"   # fallback to first available if not found
+_TTS_RATE   = 140                   # words per minute — natural, unhurried pace
+_TTS_VOLUME = 0.92                  # slightly under full to avoid harshness
+
 try:
-    tts_engine = pyttsx3.init()
-    tts_engine.setProperty('rate', 150)
-    tts_engine.setProperty('volume', 1)
+    tts_engine  = pyttsx3.init()
     tts_enabled = True
 except Exception:
+    tts_engine  = None
     tts_enabled = False
 
 
+def _configure_tts():
+    """Apply voice, rate and volume — called fresh each time to beat SAPI5 caching."""
+    if not tts_engine:
+        return
+    voices = tts_engine.getProperty("voices") or []
+    chosen = next(
+        (v for v in voices if _PREFERRED_VOICE_KEYWORD in v.name.lower()),
+        voices[0] if voices else None,
+    )
+    if chosen:
+        tts_engine.setProperty("voice", chosen.id)
+    tts_engine.setProperty("rate",   _TTS_RATE)
+    tts_engine.setProperty("volume", _TTS_VOLUME)
+
+
 def speak(text):
-    if tts_enabled:
-        try:
-            tts_engine.say(text)
-            tts_engine.runAndWait()
-        except Exception:
-            pass
+    """Speak text aloud using the configured TTS engine. Fails silently."""
+    if not tts_enabled or not tts_engine:
+        return
+    try:
+        _configure_tts()
+        tts_engine.say(str(text))
+        tts_engine.runAndWait()
+    except Exception:
+        pass
+
 
 
 def distance(v1, v2):
@@ -197,6 +224,7 @@ def record_face(name, samples=50):
             ret, frame = cap.read()
             if not ret:
                 continue
+            frame = cv2.flip(frame, 1)  # mirror-fix: left↔right
 
             h_frame, w_frame = frame.shape[:2]
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -298,7 +326,7 @@ def recognize_and_mark_attendance(db_module):
     names, trainset = loaded
     current_date = str(datetime.date.today())
     marked_students = []
-    speak("Starting face recognition")
+    speak("Taking Attendance")
 
     # OpenCV uses BGR color order.
     PURPLE    = (246, 92, 139)
@@ -329,6 +357,7 @@ def recognize_and_mark_attendance(db_module):
             ret, frame = cap.read()
             if not ret:
                 continue
+            frame = cv2.flip(frame, 1)  # mirror-fix: left↔right
 
             h_frame, w_frame = frame.shape[:2]
             gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -392,7 +421,7 @@ def recognize_and_mark_attendance(db_module):
                     current_time = datetime.datetime.now().strftime("%H:%M:%S")
                     if not db_module.check_attendance_exists(sid, current_date):
                         db_module.mark_attendance(sid, current_date, current_time, "P")
-                        speak(f"{matched_name} marked present")
+                        speak(f"{matched_name} Present")
                         marked_students.append(matched_name)
                         last_marked  = matched_name
                         status_msg   = f"Marked present: {matched_name}"

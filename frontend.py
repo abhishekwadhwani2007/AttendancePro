@@ -120,8 +120,10 @@ class Toast:
 def _parse_class_name(name):
     nums = re.findall(r"\d+", name)
     std = int(nums[0]) if nums else 10
-    letters = re.findall(r"\b([A-Z])\b", name.upper())
-    sec = letters[0] if letters else "A"
+    section_match = re.search(r"\d+\s*-\s*(.+)$", name)
+    if not section_match:
+        section_match = re.search(r"\d+\s+([^\d]+)$", name)
+    sec = section_match.group(1).strip() if section_match else "A"
     return std, sec
 
 
@@ -296,9 +298,11 @@ class AttendanceProApp(ctk.CTk):
         x = np.arange(len(dates))
         y = np.array([float(v) for v in counts])
 
-        # Real average: mean daily attendance as a % of total students
-        if len(y) and total_students:
-            avg_pct = y.mean() / total_students * 100
+        # Correct average: sum of present / (school days with records × total students)
+        # Excludes zero-attendance days (weekends, holidays) from the denominator
+        school_days = [v for v in y if v > 0]
+        if school_days and total_students:
+            avg_pct = (sum(school_days) / (len(school_days) * total_students)) * 100
             avg_str = f"{avg_pct:.1f}%"
         else:
             avg_str = "0%"
@@ -784,7 +788,9 @@ class AttendanceProApp(ctk.CTk):
 
     def _save_class(self):
         num = self.cls_num_entry.get().strip()
-        sec = self.cls_sec_entry.get().strip().upper()
+        sec_raw = self.cls_sec_entry.get().strip()
+        # Normalize section: uppercase if single character, else capitalize first letter
+        sec = sec_raw.upper() if len(sec_raw) == 1 else sec_raw.capitalize()
         if not num: return Toast(self, "Class number is required", "error")
         name = f"Class {num}" + (f" - {sec}" if sec else "")
         try:
