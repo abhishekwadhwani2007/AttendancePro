@@ -14,7 +14,7 @@ DB_PATH = os.path.join(BASE_DIR, "attendance.db")
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
-    # WAL mode prevents read-blocking-write; cache_size speeds up repeated queries
+    # Keep the desktop UI responsive during repeated reads and writes.
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA cache_size = 10000")
     conn.execute("PRAGMA synchronous = NORMAL")
@@ -24,7 +24,6 @@ def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Existing tables
     cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
     tables = [row[0] for row in cur.fetchall()]
 
@@ -90,7 +89,6 @@ def init_db():
         """
     )
 
-    # Default class
     cur.execute("SELECT COUNT(*) FROM classes")
     if cur.fetchone()[0] == 0:
         cur.execute(
@@ -98,7 +96,6 @@ def init_db():
             ("Default Class", "Default class for students", str(datetime.datetime.now())),
         )
 
-    # Indexes — critical for query speed. Without them, every filter is a full scan.
     cur.execute("CREATE INDEX IF NOT EXISTS idx_attendance_date_status ON attendance(date, status)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_attendance_student_date ON attendance(student_id, date)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_students_name ON students(name)")
@@ -128,7 +125,7 @@ def get_all_students(search_term=None):
     conn = get_db_connection()
     cur = conn.cursor()
     if search_term:
-        s = f"%{search_term}%" # Adding wildcards for partial matching
+        s = f"%{search_term}%"
         cur.execute(
             """
             SELECT id, grno, rollno, name, std, section, gender, phoneno, photo_path
@@ -162,21 +159,21 @@ def get_student_by_id(student_id):
 def get_student_by_name(name):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM students WHERE name LIKE ?", (f"%{name}%",)) # fuzzy search
+    cur.execute("SELECT * FROM students WHERE name LIKE ?", (f"%{name}%",))
     student = cur.fetchone()
     conn.close()
     return student
 
-def update_student(student_id, grno, rollno, name, std, section, gender, phoneno):
+def update_student(student_id, grno, rollno, name, std, section, gender, phoneno, class_id):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
         """
         UPDATE students
-        SET grno = ?, rollno = ?, name = ?, std = ?, section = ?, gender = ?, phoneno = ?
+        SET grno = ?, rollno = ?, name = ?, std = ?, section = ?, gender = ?, phoneno = ?, class_id = ?
         WHERE id = ?
         """,
-        (grno, rollno, name, std, section, gender, phoneno, student_id),
+        (grno, rollno, name, std, section, gender, phoneno, class_id, student_id),
     )
     conn.commit()
     conn.close()
@@ -253,12 +250,10 @@ def get_attendance_last_n_days(ndays=7):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Build the date range we care about
     today = datetime.date.today()
     date_range = [(today - datetime.timedelta(days=ndays - 1 - i)) for i in range(ndays)]
     start_date, end_date = str(date_range[0]), str(date_range[-1])
 
-    # One query instead of N — group counts by date, then map back
     cur.execute(
         "SELECT date, COUNT(DISTINCT student_id) FROM attendance "
         "WHERE date BETWEEN ? AND ? AND status = 'P' GROUP BY date",
@@ -357,7 +352,6 @@ def get_all_classes():
 def get_classes_detailed():
     conn = get_db_connection()
     cur = conn.cursor()
-    # Embed student count in the same query — eliminates N+1 in the classes view
     cur.execute("""
         SELECT c.id, c.name, c.description, c.created_at, COUNT(s.id) as student_count
         FROM classes c
@@ -383,6 +377,10 @@ def add_class(name, description):
 def delete_class(class_id):
     conn = get_db_connection()
     cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM students WHERE class_id = ?", (class_id,))
+    if cur.fetchone()[0] > 0:
+        conn.close()
+        raise ValueError("Move or delete students before deleting this class.")
     cur.execute("DELETE FROM classes WHERE id = ?", (class_id,))
     conn.commit()
     conn.close()

@@ -1,111 +1,87 @@
+# AttendancePro
 
-# AttendancePro v2.0 📸
+AttendancePro is a local desktop attendance management app built with Python, CustomTkinter, OpenCV, and SQLite. It helps schools or coaching classes register students, capture face data through a webcam, and mark daily attendance with face recognition.
 
-<div align="center">
+The current app version is **v2.5**. It keeps the full workflow local: student records, attendance logs, app settings, and face samples stay on the user's machine. That makes the project easy to run for learning, demos, and small classroom setups without requiring a hosted backend or paid services.
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue?style=for-the-badge&logo=appveyor)
-![Python](https://img.shields.io/badge/python-3.8%2B-blue?style=for-the-badge&logo=python&logoColor=white)
-![Status](https://img.shields.io/badge/status-stable-success?style=for-the-badge)
-![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
+## Interface Preview
 
-</div>
+### Dashboard
 
-**AttendancePro** is a desktop application that uses **computer vision** to automate the attendance process.  
-It scans faces through a webcam, verifies them against a registered student database, and logs attendance automatically — **completely hands-free**.
+![Dashboard](screenshots/Dashboard.png)
 
-I originally built **AttendancePro v1.0** during my **12th grade (Commerce + Computer Science)**.  
-Now, **v2.0** is a complete rewrite with a modern dark-themed UI, visual analytics, and a clean, modular architecture.
+### Student And Class Management
 
----
-
-## 📸 Interface Preview
-
-### 📊 Dashboard
-The central hub of the application showing quick analytics and attendance statistics.
-
-![Dashboard](screenshots/dashboard.png)
-
----
-
-### 👥 Student Management
-Easily manage classes and register new students into the system.
-
-| Class Management | Add New Student |
+| Class Management | Add Student |
 |:---:|:---:|
-| ![Class Management](screenshots/Class%20Management.png) | ![Add Student](screenshots/add%20student.png) |
+| ![Class Management](screenshots/classManagement.png) | ![Add Student](screenshots/addStudent.png) |
 
----
+### Face Data Capture
 
-### 🤖 Face Recognition in Action
-Real-time face data collection and attendance marking.
+![Recording Face Data](screenshots/recordingFaceData.png)
 
-| Recording Face Data | Taking Attendance |
-|:---:|:---:|
-| ![Recording Face Data](screenshots/recording%20face%20data.png) | ![Taking Attendance](screenshots/taking%20attendance.png) |
+### Attendance
 
----
+![Attendance](screenshots/Attendance.png)
 
-## 👨‍💻 The Story Behind This Project
+## What It Does
 
-> *"My goal is to become an AI/ML Engineer.  
-> My strength lies in Computer Science and understanding the logic behind the magic."*
+- Registers students with GR number, roll number, class, section, gender, and phone number
+- Captures webcam face samples and stores them locally as NumPy data
+- Recognizes registered faces with OpenCV face detection and KNN matching
+- Marks daily attendance while preventing duplicate attendance for the same student and date
+- Shows dashboard metrics for total students, present students, classes, and daily records
+- Displays a weekly attendance trend chart
+- Provides attendance reports with date range and student-name filters
+- Exports report data to CSV for spreadsheet workflows
+- Manages class batches directly from the desktop UI
+- Gives local voice feedback through `pyttsx3`
 
-I started my academic journey in the **Commerce stream**, but my interest in logic, programming, and automation gradually pulled me into the world of technology.
+## Tech Stack
 
-I spent nearly **6 months** building this project from scratch to deeply understand how **OpenCV**, **machine learning concepts**, and **databases** interact in real-world applications.  
-AttendancePro became my personal playground for learning Python and AI fundamentals, and it now forms a strong base for my journey in **Integrated MSc (AI/ML)**.
+- Python 3.8+
+- CustomTkinter
+- OpenCV
+- NumPy
+- SQLite
+- Matplotlib
+- SciPy
+- Pillow
+- pyttsx3
+- packaging
 
----
+## Project Structure
 
-## 🧩 The Logic Behind the Magic
-
-``` mermaid
-graph TD
-    Start((Launch App)) --> Dash[🏠 Dashboard]
-    Dash --> Nav{User Action}
-    Nav -- Add Student --> Form[📝 Enter Details]
-    Form --> Cam1[📸 Capture Face]
-    Cam1 --> Train[⚙️ Train Model]
-    Train --> Save[(💾 Save to DB)]
-    Nav -- Take Attendance --> Cam2[📹 Webcam]
-    Cam2 --> Detect{Face Detected?}
-    Detect -- Yes --> Log[✅ Mark Attendance]
-```
-
----
-
-## 🚀 What's New in v2.0
-
-The second version focuses on transforming a learning project into a **professional desktop application**.
-
-- 🎨 **Modern User Interface** — Built using CustomTkinter with dark mode support  
-- 📊 **Visual Analytics** — Attendance trends displayed using Matplotlib graphs  
-- 🗄️ **Zero-Setup Database** — SQLite eliminates the need for external database installation  
-- 🧩 **Modular Architecture** — Clean separation between UI, logic, and database layers  
-- 🔊 **Voice Feedback** — Spoken confirmation when attendance is successfully marked  
-
----
-
-## 📂 Project Structure
-
-```
+```text
 AttendancePro/
-├── face_dataset/        # Stored face embeddings (NumPy arrays)
-├── screenshots/         # Images used in README
-├── backend.py           # Face recognition and ML logic
-├── db_logic.py          # SQLite database operations
-├── frontend.py          # CustomTkinter GUI
-├── main.py              # Application entry point
-├── haarcascade...xml    # OpenCV face detection model
-└── requirements.txt     # Python dependencies
+├── screenshots/                 # README images
+├── backend.py                   # Face capture, recognition, config, and utility logic
+├── db_logic.py                  # SQLite schema and database operations
+├── frontend.py                  # CustomTkinter desktop UI
+├── main.py                      # Application entry point
+├── requirements.txt             # Python dependencies
+└── README.md
 ```
 
----
+Runtime files are created locally and should not be committed:
 
-## 🗄️ Database ER Diagram
+- `attendance.db`
+- `attendance.db-*`
+- `config.json`
+- `.env`
+- `face_dataset/`
+- `haarcascade_frontalface_default.xml`
+- build output such as `build/` and `dist/`
+
+## Database Overview
+
+AttendancePro creates and updates its SQLite database automatically on launch.
 
 ```mermaid
 erDiagram
+    CLASSES ||--o{ STUDENTS : has
+    STUDENTS ||--o{ ATTENDANCE : logs
+
     CLASSES {
         INTEGER id PK
         TEXT name
@@ -139,57 +115,65 @@ erDiagram
         TEXT key PK
         TEXT value
     }
-
-    CLASSES ||--o{ STUDENTS : "has"
-    STUDENTS ||--o{ ATTENDANCE : "logs"
 ```
 
----
+## Automatic Face Detection Model
 
-## 💡 Key Features
+The app uses OpenCV's Haar Cascade model for face detection. If `haarcascade_frontalface_default.xml` is missing, AttendancePro downloads it automatically on startup and stores it in the project/runtime folder.
 
-- 🎯 **Face Recognition System** using OpenCV (Haar Cascades + KNN)
-- 🗣️ **Voice Feedback** using pyttsx3 for confirmation
-- 📈 **Smart Dashboard** with live attendance statistics
-- 📤 **CSV Export** for Excel / Google Sheets integration
-- 🔐 **Duplicate Prevention** — Attendance is marked only once per day
+This file is intentionally ignored by Git because it is a generated runtime dependency. A fresh clone can still run normally as long as the machine has internet access the first time the app starts. If the automatic download fails, manually download `haarcascade_frontalface_default.xml` from OpenCV's Haar Cascade data and place it beside `main.py`.
 
----
+## Setup
 
-## 🛠️ Tech Stack
+1. Clone the repository.
 
-- **Programming Language:** Python 3.x  
-- **GUI Framework:** CustomTkinter  
-- **Computer Vision:** OpenCV, NumPy  
-- **Database:** SQLite  
-- **Visualization:** Matplotlib  
-
----
-
-## ⚡ How to Run the Project
-
-### 1️⃣ Clone the repository
 ```bash
 git clone https://github.com/abhishekwadhwani2007/AttendancePro.git
 cd AttendancePro
 ```
 
-### 2️⃣ Install dependencies
+2. Create and activate a virtual environment.
+
+```bash
+python -m venv venv
+venv\Scripts\activate
+```
+
+3. Install dependencies.
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3️⃣ Run the application
+4. Run the application.
+
 ```bash
 python main.py
 ```
 
-> **Note:** The database file (`attendance.db`) is automatically created on the first run.
+On first launch, the app creates the SQLite database, prepares the local face dataset folder, and downloads the Haar Cascade file if it is not already available.
 
----
+## How The Workflow Feels
 
-<div align="center">
+Start by creating class batches, then add students to those classes. When a student is added, the app opens the webcam and records face samples. Later, the attendance screen opens a recognition window where registered faces can be marked present for the current date.
 
-Made with ❤️ by **Abhishek Wadhwani**
+Reports can be generated by date range and filtered by student name. Exported CSV files can be opened in Excel, Google Sheets, or any spreadsheet tool.
 
-</div>
+## Security And Privacy
+
+AttendancePro is designed as a local-first desktop app. It does not require API keys, cloud accounts, passwords, or external databases for the current version.
+
+Because the project handles student data and face samples, keep local runtime files private and out of version control. Review `.gitignore` before publishing or packaging the app.
+
+## Roadmap
+
+The next development phase will focus on making the app easier to test, package, and maintain while improving recognition reliability and UI responsiveness.
+
+Planned directions include:
+
+- Cleaner service boundaries between UI, database, and recognition logic
+- Stronger form validation and clearer error states
+- Better model/data management for face recognition
+- Automated tests for database and attendance workflows
+- Packaged desktop releases with a smoother setup experience
+- Optional architecture improvements for larger deployments

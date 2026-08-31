@@ -3,5 +3,6 @@ opencv-python
 pyttsx3
 customtkinter
 matplotlib
+scipy
 packaging
 pillow

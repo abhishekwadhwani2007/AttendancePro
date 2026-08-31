@@ -1,1582 +1,840 @@
-import customtkinter as ctk
-import tkinter as tk
-import tkinter.ttk as ttk
-from tkinter import messagebox, filedialog
-import datetime
+
+"""Desktop interface for AttendancePro."""
+
 import csv
+import datetime
+import re
+import tkinter as tk
+import customtkinter as ctk
+from tkinter import messagebox, filedialog
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from scipy.interpolate import make_interp_spline
 
-# Set appearance
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-THEME = {
-    # Backgrounds
-    "bg_primary": "#0F0F1A",
-    "bg_secondary": "#1A1B26",
-    "bg_tertiary": "#24253A",
-    "card_bg": "#2A2B3E",
-    "card_hover": "#353649",
-    # Accent Colors
-    "accent_purple": "#5865F2",
-    "accent_blue": "#00D9FF",
-    "accent_pink": "#FF6B9D",
-    "accent_yellow": "#FFC700",
-    # Status Colors
-    "success": "#3BA55D",
-    "warning": "#FAA81A",
-    "danger": "#ED4245",
-    "info": "#7289DA",
-    # Text
-    "text_primary": "#FFFFFF",
-    "text_secondary": "#B9BBBE",
-    "text_tertiary": "#72767D",
-    # Borders
-    "border": "#3A3B4E",
-    "border_focus": "#5865F2",
+C = {
+    "sidebar": "#050505", "main": "#0A0A0B", "card": "#111113",
+    "purple":  "#8B5CF6", "purple2": "#7C3AED",
+    "white":   "#F8FAFC", "muted":   "#94A3B8",
+    "border":  "#27272A", "border2": "#3F3F46",
+    "gold":    "#FBBF24", "red":     "#EF4444",
+    "green":   "#10B981", "blue":    "#3B82F6",
 }
 
-APP_NAME = "AttendancePro"
-VERSION = "2.0"
+APP = "AttendancePro"
+VER = "2.5"
+
+BIG   = ("Segoe UI", 26, "bold")
+HEAD  = ("Segoe UI", 16, "bold")
+BODY  = ("Segoe UI", 13)
+BOLD  = ("Segoe UI", 12, "bold")
+SMALL = ("Segoe UI", 11)
+TINY  = ("Segoe UI", 10)
+
+
+def _tint(hex_color, alpha=0.15, bg="#111113"):
+    """Blend a colour at given opacity over the card background."""
+    r1, g1, b1 = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+    r2, g2, b2 = int(bg[1:3], 16),        int(bg[3:5], 16),        int(bg[5:7], 16)
+    return "#{:02x}{:02x}{:02x}".format(
+        int(r1 * alpha + r2 * (1 - alpha)),
+        int(g1 * alpha + g2 * (1 - alpha)),
+        int(b1 * alpha + b2 * (1 - alpha)),
+    )
+
+
+# ── Reusable widgets ──────────────────────────────────────────────────────────
+
+class Btn(ctk.CTkButton):
+    """Standard filled purple action button."""
+    def __init__(self, parent, **kw):
+        kw.setdefault("height", 40)
+        kw.setdefault("fg_color", C["purple"])
+        kw.setdefault("hover_color", C["purple2"])
+        super().__init__(parent, corner_radius=8, font=("Segoe UI", 13, "bold"),
+                         text_color="#fff", **kw)
+
+
+class GhostBtn(ctk.CTkButton):
+    """Outlined transparent button for secondary actions."""
+    def __init__(self, parent, **kw):
+        kw.setdefault("height", 40)
+        kw.setdefault("border_color", C["border2"])
+        kw.setdefault("text_color", C["white"])
+        super().__init__(parent, corner_radius=8, font=("Segoe UI", 13, "bold"),
+                         fg_color="transparent", border_width=1,
+                         hover_color=C["border"], **kw)
+
+
+class Field(ctk.CTkEntry):
+    """Standard dark input field."""
+    def __init__(self, parent, **kw):
+        kw.setdefault("height", 36)
+        super().__init__(parent, corner_radius=6, font=BODY,
+                         fg_color=C["card"], border_width=1,
+                         border_color=C["border"], text_color=C["white"], **kw)
+
+
+class Card(ctk.CTkFrame):
+    """Dark card panel with a subtle border."""
+    def __init__(self, parent, **kw):
+        super().__init__(parent, corner_radius=12, fg_color=C["card"],
+                         border_width=1, border_color=C["border"], **kw)
+
 
 class Toast:
-    def __init__(self, parent, message, type="info", duration=3000):
-        self.toast = ctk.CTkFrame(
-            parent,
-            fg_color=THEME["success"] if type == "success" else THEME["danger"] if type == "error" else THEME["warning"] if type == "warning" else THEME["info"],
-            corner_radius=10
-        )
-        
-        icon_map = {
-            "success": "✓",
-            "error": "✕",
-            "warning": "⚠",
-            "info": "ℹ"
-        }
-        
-        icon = icon_map.get(type, "ℹ")
-        ctk.CTkLabel(
-            self.toast,
-            text=f"{icon} {message}",
-            font=("Segoe UI", 14, "bold"),
-            text_color="#FFFFFF"
-        ).pack(padx=20, pady=12)
-        
-        self.toast.place(relx=0.5, rely=0.05, anchor="n")
-        parent.after(duration, self.destroy)
-    
-    def destroy(self):
-        self.toast.destroy()
+    """Temporary status banner."""
+    COLORS = {"success": "#10B981", "error": "#EF4444", "warning": "#FBBF24", "info": "#8B5CF6"}
+    _current = None  # tracks the active toast frame
 
-class ModernButton(ctk.CTkButton):
-    def __init__(self, master, **kwargs):
-        defaults = {
-            "corner_radius": 10,
-            "font": ("Segoe UI", 14, "bold"),
-            "height": 45,
-        }
-        defaults.update(kwargs)
-        super().__init__(master, **defaults)
+    def __init__(self, root, msg, kind="info", ms=3000):
+        # Dismiss any toast that's already on screen
+        if Toast._current is not None:
+            try:
+                Toast._current.destroy()
+            except Exception:
+                pass
+            Toast._current = None
 
-class ModernEntry(ctk.CTkEntry):
-    def __init__(self, master, **kwargs):
-        defaults = {
-            "corner_radius": 8,
-            "font": ("Segoe UI", 14),
-            "height": 40,
-            "border_width": 2,
-            "fg_color": THEME["card_bg"],
-            "border_color": THEME["border"],
-        }
-        defaults.update(kwargs)
-        super().__init__(master, **defaults)
+        bg = self.COLORS.get(kind, C["purple"])
+        frame = ctk.CTkFrame(root, fg_color=bg, corner_radius=8)
+        ctk.CTkLabel(frame, text=msg, font=("Segoe UI", 13, "bold"),
+                     text_color="#fff").pack(padx=24, pady=12)
+        frame.place(relx=0.5, rely=0.05, anchor="n")
+        Toast._current = frame
+        root.after(ms, lambda: self._dismiss(frame))
 
-class ModernCard(ctk.CTkFrame):
-    def __init__(self, master, **kwargs):
-        defaults = {
-            "corner_radius": 15,
-            "fg_color": THEME["card_bg"],
-            "border_width": 1,
-            "border_color": THEME["border"],
-        }
-        defaults.update(kwargs)
-        super().__init__(master, **defaults)
+    @staticmethod
+    def _dismiss(frame):
+        try:
+            frame.destroy()
+            if Toast._current is frame:
+                Toast._current = None
+        except Exception:
+            pass
+
+
+def _parse_class_name(name):
+    nums = re.findall(r"\d+", name)
+    std = int(nums[0]) if nums else 10
+    letters = re.findall(r"\b([A-Z])\b", name.upper())
+    sec = letters[0] if letters else "A"
+    return std, sec
+
+
+# ── Application ───────────────────────────────────────────────────────────────
 
 class AttendanceProApp(ctk.CTk):
-    
-    def __init__(self, db_module, backend_module, config):
+
+    def __init__(self, db, backend, config):
         super().__init__()
-        
-        # Store modules
-        self.db = db_module
-        self.backend = backend_module
-        self.config = config
-        
-        self.title(f"{APP_NAME} v{VERSION}")
+        self.db      = db
+        self.bk      = backend
+        self.cfg     = config
+        self.title(f"{APP} v{VER}")
         self.geometry("1400x900")
-        self.configure(fg_color=THEME["bg_primary"])
-        
-        # State
-        self.current_view = None
-        # Handle close button (X) properly
-        self.protocol("WM_DELETE_WINDOW", self.on_closing)
-        # Create main layout
-        self.create_layout()
-        # Show dashboard
+        self.configure(fg_color=C["sidebar"])
+        self.protocol("WM_DELETE_WINDOW", self._quit)
+        self._build()
         self.show_dashboard()
-    
-    def on_closing(self):
+
+    def _quit(self):
         try:
-            if hasattr(self, 'backend') and hasattr(self.backend, 'tts_engine') and self.backend.tts_engine:
-                try:
-                    self.backend.tts_engine.stop()
-                except Exception:
-                    pass
+            self.bk.tts_engine.stop()
         except Exception:
             pass
-        try:
-            import cv2
-            cv2.destroyAllWindows()
-        except Exception:
-            pass
-        try:
-            import matplotlib.pyplot as plt
-            plt.close("all")
-        except Exception:
-            pass
-        try:
-            self.quit()
-            self.destroy()
-        except Exception:
-            pass
-        import os
-        os._exit(0)
-    
-    def create_layout(self):
-        # Main container
-        self.main_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_container.pack(fill="both", expand=True)
-        
-        self.create_sidebar()
-        self.content_area = ctk.CTkFrame(
-            self.main_container,
-            fg_color=THEME["bg_secondary"],
-            corner_radius=0
-        )
-        self.content_area.pack(side="right", fill="both", expand=True)
-    
-    def create_sidebar(self):
-        sidebar = ctk.CTkFrame(
-            self.main_container,
-            width=280,
-            fg_color=THEME["bg_tertiary"],
-            corner_radius=0
-        )
-        sidebar.pack(side="left", fill="y")
-        sidebar.pack_propagate(False) #Prevents the frame from shrinking to fit its content, keeping the fixed width
-        
-        # Logo/Title
-        logo_frame = ctk.CTkFrame(sidebar, fg_color="transparent", height=100)
-        logo_frame.pack(fill="x", pady=20, padx=20)
-        ctk.CTkLabel(
-            logo_frame,
-            text=APP_NAME,
-            font=("Segoe UI", 24, "bold"),
-            text_color=THEME["accent_purple"]
-        ).pack()
-        ctk.CTkLabel(
-            logo_frame,
-            text=f"v{VERSION}",
-            font=("Segoe UI", 11),
-            text_color=THEME["text_tertiary"]
-        ).pack()
-        
-        nav_buttons = [
-            ("📊", "Dashboard", self.show_dashboard, THEME["accent_purple"]),
-            ("👥", "Students", self.show_students, THEME["accent_blue"]),
-            ("✓", "Attendance", self.show_attendance, THEME["accent_pink"]),
-            ("📈", "Reports", self.show_reports, THEME["accent_yellow"]),
-            ("📚", "Classes", self.show_classes, THEME["info"]),
-            ("⚙", "Settings", self.show_settings, THEME["text_secondary"]),
+        plt.close("all")
+        self.destroy()
+        self.quit()
+
+    # ── Skeleton ──────────────────────────────────────────────────────────────
+
+    def _build(self):
+        wrap = ctk.CTkFrame(self, fg_color="transparent")
+        wrap.pack(fill="both", expand=True)
+
+        # Sidebar — a raw tk.Canvas so we can control z-order of nav buttons
+        self.sb = tk.Canvas(wrap, width=240, highlightthickness=0, bg=C["sidebar"])
+        self.sb.pack(side="left", fill="y")
+        self._build_sidebar()
+
+        # Main content area — pages render here
+        self.area = ctk.CTkFrame(wrap, fg_color=C["main"], corner_radius=0)
+        self.area.pack(side="right", fill="both", expand=True)
+
+    def _build_sidebar(self):
+        # Logo
+        logo_frame = ctk.CTkFrame(self.sb, fg_color="transparent")
+        self.sb.create_window(120, 75, window=logo_frame, width=200)
+        ctk.CTkLabel(logo_frame, text=APP, font=("Segoe UI", 18, "bold"), text_color=C["white"]).pack()
+        ctk.CTkLabel(logo_frame, text=f"v{VER}", font=TINY, text_color=C["muted"]).pack()
+
+        # Navigation buttons
+        nav_items = [
+            ("⊞  Dashboard",  self.show_dashboard,  "Dashboard"),
+            ("👥  Students",   self.show_students,   "Students"),
+            ("☑  Attendance", self.show_attendance, "Attendance"),
+            ("📄  Reports",    self.show_reports,    "Reports"),
+            ("🏫  Classes",    self.show_classes,    "Classes"),
+            ("⚙  Settings",   self.show_settings,   "Settings"),
         ]
-        
-        self.nav_buttons = {}
-        for icon, text, command, color in nav_buttons:
+        self.nav_btns = {}
+        y = 185
+        for label, cmd, key in nav_items:
             btn = ctk.CTkButton(
-                sidebar,
-                text=f"{icon}  {text}",
-                font=("Segoe UI", 15, "bold"),
-                fg_color="transparent",
-                hover_color=THEME["card_hover"],
-                text_color=THEME["text_secondary"],
-                anchor="w",
-                height=50,
-                command=command
+                self.sb, text=label, font=("Segoe UI", 13, "bold"),
+                fg_color="transparent", hover_color=C["card"],
+                text_color=C["white"], anchor="w",
+                height=44, corner_radius=8, command=cmd,
             )
-            btn.pack(fill="x", padx=15, pady=5)
-            self.nav_buttons[text] = btn
-    
-    def clear_content(self):
-        for widget in self.content_area.winfo_children():
-            widget.destroy()
-    
-    def set_active_nav(self, name):
-        for btn_name, btn in self.nav_buttons.items():
-            if btn_name == name:
-                btn.configure(fg_color=THEME["card_bg"], text_color=THEME["text_primary"])
-            else:
-                btn.configure(fg_color="transparent", text_color=THEME["text_secondary"])
-    
-    def show_dashboard(self):
-        self.clear_content()
-        self.set_active_nav("Dashboard")
-        
-        # Header
-        header = ctk.CTkFrame(self.content_area, fg_color="transparent", height=80)
-        header.pack(fill="x", padx=30, pady=20)
-        ctk.CTkLabel(
-            header,
-            text="📊 Dashboard",
-            font=("Segoe UI", 32, "bold"),
-            text_color=THEME["text_primary"],
-        ).pack(side="left")
-        
-        # Stats cards
-        stats_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
-        stats_frame.pack(fill="x", padx=30, pady=10)
-        
-        # Get stats
-        total_students = self.db.get_student_count()
-        today_present = self.db.get_attendance_count_today()
-        total_classes = len(self.db.get_all_classes())
-        total_attendance_today = self.db.get_total_attendance_today()
-        
-        stats = [
-            ("Total Students", str(total_students), THEME["accent_purple"], "👥"),
-            ("Present Today", str(today_present), THEME["success"], "✓"),
-            ("Total Classes", str(total_classes), THEME["accent_blue"], "📚"),
-            ("Attendance Today", str(total_attendance_today), THEME["accent_pink"], "📝"),
-        ]
-        
-        for i, (title, value, color, icon) in enumerate(stats): #To keep track with index number
-            card = ModernCard(stats_frame)
-            card.grid(row=0, column=i, padx=10, sticky="ew")
-            stats_frame.grid_columnconfigure(i, weight=1)
-            
-            ctk.CTkLabel(card, text=icon, font=("Segoe UI", 40)).pack(pady=(20, 5))
-            ctk.CTkLabel(card, text=value, font=("Segoe UI", 36, "bold"), text_color=color).pack()
-            ctk.CTkLabel(card, text=title, font=("Segoe UI", 14), text_color=THEME["text_secondary"]).pack(pady=(0, 20))
-        
-        # Charts section
-        charts_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
-        charts_frame.pack(fill="both", expand=True, padx=30, pady=20)
-        
-        # Search filter for attendance trends
-        filter_frame = ctk.CTkFrame(charts_frame, fg_color="transparent")
-        filter_frame.pack(fill="x", pady=(0, 10))
-        
-        self.dashboard_trend_name = ModernEntry(
-            filter_frame,
-            placeholder_text="🔍 Search attendance trends by student name (leave blank for overall)...",
-            width=450,
-        )
-        self.dashboard_trend_name.pack(side="left", padx=(0, 10))
-        
-        ModernButton(
-            filter_frame,
-            text="Apply Filter",
-            fg_color=THEME["accent_purple"],
-            hover_color=THEME["accent_blue"],
-            command=self.load_dashboard_trend_chart,
-            width=120,
-            height=40,
-        ).pack(side="left")
-        
-        # Container for the chart (will be redrawn on filter)
-        self.dashboard_trend_container = ctk.CTkFrame(charts_frame, fg_color="transparent")
-        self.dashboard_trend_container.pack(fill="both", expand=True, pady=(0, 10))
-        
-        # Initial chart load
-        dates, counts = self.db.get_attendance_last_n_days(7)
-        self.create_attendance_chart(
-            self.dashboard_trend_container,
-            title="Attendance Trends - Overall (Last 7 Days)",
-            dates=dates,
-            counts=counts
-        )
-        
-        # Recent activity
-        self.create_recent_activity(charts_frame)
-    
-    def load_dashboard_trend_chart(self):
-        # Clear existing chart
-        for widget in self.dashboard_trend_container.winfo_children():
-            widget.destroy()
-        
-        name = self.dashboard_trend_name.get().strip()
-        
-        if name:
-            dates, counts = self.db.get_attendance_trend_by_name(name, 7)
-            if not dates or sum(counts) == 0:
-                Toast(self, f"No attendance data found for '{name}'", "info")
-                dates, counts = self.db.get_attendance_last_n_days(7)
-                title = "Attendance Trends - Overall (Last 7 Days)"
-            else:
-                title = f"Attendance Trends - {name} (Last 7 Days)"
-        else:
-            dates, counts = self.db.get_attendance_last_n_days(7)
-            title = "Attendance Trends - Overall (Last 7 Days)"
-        
-        self.create_attendance_chart(
-            self.dashboard_trend_container,
-            title=title,
-            dates=dates,
-            counts=counts
-        )
-    
-    def create_attendance_chart(self, parent, title="Attendance Trends (Last 7 Days)", dates=None, counts=None):
-        chart_card = ModernCard(parent)
-        chart_card.pack(fill="both", expand=True, pady=(0, 10))
-        
-        ctk.CTkLabel(
-            chart_card,
-            text=title,
-            font=("Segoe UI", 18, "bold"),
-            text_color=THEME["text_primary"]
-        ).pack(pady=15, padx=20, anchor="w")
-        
-        # Get data if not provided
-        if dates is None or counts is None:
-            dates, counts = self.db.get_attendance_last_n_days(7)
-        
-        # Create chart
-        fig, ax = plt.subplots(figsize=(10, 4), facecolor=THEME["card_bg"])
-        ax.set_facecolor(THEME["card_bg"])
-        ax.plot(dates, counts, color=THEME["accent_purple"], linewidth=3, marker='o', markersize=8)
-        ax.fill_between(dates, counts, alpha=0.3, color=THEME["accent_purple"])
-        ax.set_xlabel("Date", color=THEME["text_secondary"], fontsize=12)
-        ax.set_ylabel("Students Present", color=THEME["text_secondary"], fontsize=12)
-        ax.tick_params(colors=THEME["text_secondary"])
-        ax.spines['bottom'].set_color(THEME["border"])
-        ax.spines['left'].set_color(THEME["border"])
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.grid(True, alpha=0.2, color=THEME["border"])
-        
-        canvas = FigureCanvasTkAgg(fig, chart_card)
-        canvas.draw() # Renders the matplotlib figure onto the Tkinter canvas
-        canvas.get_tk_widget().pack(fill="both", expand=True, padx=20, pady=(0, 20))
-    
-    def create_recent_activity(self, parent):
-        activity_card = ModernCard(parent)
-        activity_card.pack(fill="x")
-        
-        ctk.CTkLabel(
-            activity_card,
-            text="Recent Activity",
-            font=("Segoe UI", 18, "bold"),
-            text_color=THEME["text_primary"]
-        ).pack(pady=15, padx=20, anchor="w")
-        
-        # Get recent attendance
-        records = self.db.get_recent_attendance(5)
-        
-        if records:
-            for name, date, time, status in records:
-                item = ctk.CTkFrame(activity_card, fg_color=THEME["bg_tertiary"], height=50)
-                item.pack(fill="x", padx=20, pady=5)
-                
-                status_color = THEME["success"] if status == "P" else THEME["danger"]
-                status_text = "Present" if status == "P" else "Absent"
-                
-                ctk.CTkLabel(
-                    item,
-                    text=f"👤 {name}",
-                    font=("Segoe UI", 14, "bold"),
-                    text_color=THEME["text_primary"]
-                ).pack(side="left", padx=15, pady=10)
-                
-                ctk.CTkLabel(
-                    item,
-                    text=status_text,
-                    font=("Segoe UI", 12, "bold"),
-                    text_color=status_color
-                ).pack(side="right", padx=15)
-                
-                ctk.CTkLabel(
-                    item,
-                    text=f"{date} {time}",
-                    font=("Segoe UI", 11),
-                    text_color=THEME["text_tertiary"]
-                ).pack(side="right", padx=10)
-        else:
-            ctk.CTkLabel(
-                activity_card,
-                text="No recent activity",
-                font=("Segoe UI", 14),
-                text_color=THEME["text_tertiary"]
-            ).pack(pady=20)
-    
-    def show_students(self):
-        self.clear_content()
-        self.set_active_nav("Students")
-        
-        header = ctk.CTkFrame(self.content_area, fg_color="transparent", height=80)
-        header.pack(fill="x", padx=30, pady=20)
-        ctk.CTkLabel(header, text="👥 Student Management", font=("Segoe UI", 32, "bold"),
-                     text_color=THEME["text_primary"]).pack(side="left")
-        
-        btn_frame = ctk.CTkFrame(header, fg_color="transparent")
-        btn_frame.pack(side="right")
-        ModernButton(btn_frame, text="➕ Add Student", fg_color=THEME["accent_purple"],
-                     hover_color=THEME["accent_blue"], command=self.show_add_student_inline).pack(side="left", padx=5)
-        ModernButton(btn_frame, text="📥 Bulk Import", fg_color=THEME["accent_blue"],
-                     hover_color=THEME["accent_purple"], command=self.bulk_import_dialog).pack(side="left", padx=5)
-        
-        search_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
-        search_frame.pack(fill="x", padx=30, pady=10)
-        self.student_search = ModernEntry(search_frame, placeholder_text="🔍 Search students by name, roll no, or GR no...")
-        self.student_search.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        
-        # Reset to page 1 on new search
-        self.student_page = 0
-        self.student_page_size = 20
-        self.search_timer = None
-        def on_search(event):
-            if self.search_timer:
-                self.after_cancel(self.search_timer)
-            self.student_page = 0
-            self.search_timer = self.after(300, self.load_students)
-        self.student_search.bind("<KeyRelease>", on_search)
-        
-        list_frame = ModernCard(self.content_area)
-        list_frame.pack(fill="both", expand=True, padx=30, pady=(0, 30))
-        
-        self.students_container = ctk.CTkScrollableFrame(list_frame, fg_color="transparent")
-        self.students_container.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Pagination controls sit at the bottom of the card
-        self.student_page_bar = ctk.CTkFrame(list_frame, fg_color="transparent")
-        self.student_page_bar.pack(fill="x", padx=10, pady=(0, 10))
-        
-        self.load_students()
-    
-    def load_students(self):
-        for widget in self.students_container.winfo_children():
-            widget.destroy()
-        
-        search = self.student_search.get().strip().lower() if hasattr(self, "student_search") else ""
-        all_students = self.db.get_all_students(search if search else None)
-        
-        total = len(all_students)
-        page_size = getattr(self, "student_page_size", 20)
-        page = getattr(self, "student_page", 0)
-        start = page * page_size
-        page_students = all_students[start:start + page_size]
-        
-        if not all_students:
-            ctk.CTkLabel(self.students_container, text="No students found",
-                         font=("Segoe UI", 16), text_color=THEME["text_tertiary"]).pack(pady=40)
-        else:
-            for student in page_students:
-                self.create_student_card(student)
-        
-        # Rebuild pagination bar
-        for w in self.student_page_bar.winfo_children():
+            self.sb.create_window(120, y, window=btn, width=200, height=44)
+            self.nav_btns[key] = btn
+            y += 54
+
+
+    # ── Page helpers ──────────────────────────────────────────────────────────
+
+    def _clear(self):
+        """Remove all widgets from the content area."""
+        for w in self.area.winfo_children():
             w.destroy()
+
+    def _nav(self, active_key):
+        """Highlight the active sidebar button and reset the rest."""
+        for key, btn in self.nav_btns.items():
+            if key == active_key:
+                btn.configure(fg_color=C["purple"], text_color="#fff", hover_color=C["purple2"])
+            else:
+                btn.configure(fg_color="transparent", text_color=C["white"], hover_color=C["card"])
+
+    def _page(self):
+        """Return a fresh frame that fills the content area. Pages manage their own scrolling internally."""
+        p = ctk.CTkFrame(self.area, fg_color="transparent", corner_radius=0)
+        p.pack(fill="both", expand=True)
+        return p
+
+    def _header(self, page, title, subtitle=""):
+        """Render a standard page title row and return the header frame."""
+        hdr = ctk.CTkFrame(page, fg_color="transparent")
+        hdr.pack(fill="x", padx=40, pady=(30, 20))
+        ctk.CTkLabel(hdr, text=title,    font=BIG,  text_color=C["white"]).pack(side="left")
+        ctk.CTkLabel(hdr, text=subtitle, font=BODY, text_color=C["muted"]).pack(side="left", padx=15, pady=(8, 0))
+        return hdr
+
+    def _form(self, page, title):
+        """Return a centred form card for add/edit pages."""
+        hdr = ctk.CTkFrame(page, fg_color="transparent")
+        hdr.pack(fill="x", padx=40, pady=(30, 20))
+        ctk.CTkLabel(hdr, text=title, font=BIG, text_color=C["white"]).pack(side="left")
+        card = Card(page)
+        card.pack(padx=180, pady=(0, 40), fill="x")
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(padx=50, pady=30)
+        return inner
+
+    # ── Dashboard ─────────────────────────────────────────────────────────────
+
+    def show_dashboard(self):
+        self._clear()
+        self._nav("Dashboard")
+        page = self._page()
+
+        hdr = self._header(page, "Dashboard", "System overview and daily metrics")
+
+        # Pull live numbers from the database
+        total_students  = self.db.get_student_count()
+        present_today   = self.db.get_attendance_count_today()
+        total_classes   = len(self.db.get_all_classes())
+        records_today   = self.db.get_total_attendance_today()
+        attendance_pct  = f"{int(present_today / total_students * 100)}% of total" if total_students else "0% of total"
+
+        # Four KPI cards in a row
+        kpi_row = ctk.CTkFrame(page, fg_color="transparent")
+        kpi_row.pack(fill="x", padx=40, pady=(0, 25))
+
+        kpis = [
+            ("👥", C["purple"], str(total_students), "Total Students",  "All registered"),
+            ("✅", C["green"],  str(present_today),  "Present Today",   attendance_pct),
+            ("🏫", C["blue"],   str(total_classes),  "Total Classes",   "Active classes"),
+            ("📄", C["gold"],   str(records_today),  "Records Today",   "Attendance records"),
+        ]
+        for i, (icon, color, value, title, sub) in enumerate(kpis):
+            card = self._kpi_card(kpi_row, icon, color, value, title, sub)
+            card.grid(row=0, column=i, padx=(0, 15) if i < 3 else 0, sticky="ew")
+            kpi_row.grid_columnconfigure(i, weight=1)
+
+        # Attendance chart
+        chart_card = Card(page)
+        chart_card.pack(fill="x", padx=40, pady=(0, 40))
+        self._draw_chart(chart_card)
+
+    def _kpi_card(self, parent, icon, icon_color, value, title, sub):
+        """Build one KPI card: tinted icon box on the left, stats on the right."""
+        card = Card(parent, height=95)
+        card.pack_propagate(False)
+
+        icon_box = ctk.CTkFrame(card, width=46, height=46, corner_radius=10,
+                                fg_color=_tint(icon_color))
+        icon_box.pack(side="left", padx=15)
+        icon_box.pack_propagate(False)
+        ctk.CTkLabel(icon_box, text=icon, font=("Segoe UI", 20),
+                     text_color=icon_color).place(relx=0.5, rely=0.5, anchor="center")
+
+        text_col = ctk.CTkFrame(card, fg_color="transparent")
+        text_col.pack(side="left", fill="both", expand=True, pady=15)
+        ctk.CTkLabel(text_col, text=value, font=("Segoe UI", 24, "bold"), text_color=C["white"]).pack(anchor="w")
+        ctk.CTkLabel(text_col, text=title, font=SMALL, text_color=C["muted"]).pack(anchor="w", pady=(2, 0))
+        return card
+
+    def _draw_chart(self, parent):
+        """Render the attendance trend chart."""
+        dates, counts = self.db.get_attendance_last_n_days(7)
+        total_students  = self.db.get_student_count()
+        x = np.arange(len(dates))
+        y = np.array([float(v) for v in counts])
+
+        # Real average: mean daily attendance as a % of total students
+        if len(y) and total_students:
+            avg_pct = y.mean() / total_students * 100
+            avg_str = f"{avg_pct:.1f}%"
+        else:
+            avg_str = "0%"
+
+        # Chart header row (Average + Weekly Goal card)
+        ch = ctk.CTkFrame(parent, fg_color="transparent")
+        ch.pack(fill="x", padx=30, pady=(20, 5))
+
+        left = ctk.CTkFrame(ch, fg_color="transparent")
+        left.pack(side="left")
+        ctk.CTkLabel(left, text="Attendance Overview", font=HEAD, text_color=C["white"]).pack(anchor="w")
+        ctk.CTkLabel(left, text="Average attendance",   font=SMALL, text_color=C["muted"]).pack(anchor="w", pady=(12, 0))
+        avg_row = ctk.CTkFrame(left, fg_color="transparent")
+        avg_row.pack(anchor="w")
+        ctk.CTkLabel(avg_row, text=avg_str, font=("Segoe UI", 28, "bold"), text_color=C["purple"]).pack(side="left")
+        ctk.CTkLabel(avg_row, text="  last 7 days", font=TINY, text_color=C["muted"]).pack(side="left", pady=(8, 0))
+
+        goal_card = Card(ch)
+        goal_card.pack(side="right")
+        goal_inner = ctk.CTkFrame(goal_card, fg_color="transparent")
+        goal_inner.pack(padx=20, pady=12)
+        ctk.CTkLabel(goal_inner, text="📈", font=("Segoe UI", 16), text_color=C["purple"]).pack(side="left", padx=(0, 8))
+        goal_text = ctk.CTkFrame(goal_inner, fg_color="transparent")
+        goal_text.pack(side="left")
+        ctk.CTkLabel(goal_text, text="85%",         font=("Segoe UI", 18, "bold"), text_color=C["purple"]).pack(anchor="w")
+        ctk.CTkLabel(goal_text, text="Weekly Goal", font=TINY, text_color=C["muted"]).pack(anchor="w")
+
+        # Matplotlib figure
+        bg = C["card"]
+        fig, ax = plt.subplots(figsize=(10, 3.0), facecolor=bg)
+        ax.set_facecolor(bg)
+
+        if len(x) >= 3:
+            xn  = np.linspace(x.min(), x.max(), 300)
+            spl = make_interp_spline(x, y, k=min(2, len(x) - 1))
+            yn  = np.clip(spl(xn), 0, None)
+            ax.fill_between(xn, yn, alpha=0.15, color=C["purple"])
+            ax.plot(xn, yn, color=C["purple"], linewidth=2.5)
+            ax.scatter([x[-1]], [y[-1]], s=280, color=C["purple"], alpha=0.22)
+        elif len(x) > 0:
+            ax.plot(x, y, color=C["purple"], linewidth=2.5)
+
+        if len(x) > 0:
+            ax.scatter(x, y, s=55, color=C["card"], edgecolors=C["purple"], linewidths=2.0, zorder=4)
+            for xi, yi in zip(x, y):
+                ax.annotate(str(int(yi)), (xi, yi), textcoords="offset points",
+                            xytext=(0, 11), ha="center", fontsize=10,
+                            color=C["white"], fontweight="bold")
+
+        # X-axis labels — DB gives "MM/DD", we add day-of-week above
+        x_labels = []
+        year = datetime.date.today().year
+        for d in dates:
+            try:
+                dt = datetime.datetime.strptime(f"{year}/{d}", "%Y/%m/%d")
+                x_labels.append(f"{dt.strftime('%a')}\n{d}")
+            except Exception:
+                x_labels.append(d)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(x_labels, color=C["muted"], fontsize=9)
+        ax.tick_params(colors=C["muted"], length=0)
+        for sp in ax.spines.values(): sp.set_visible(False)
+        ax.yaxis.grid(True, alpha=0.12, color=C["muted"], linestyle="--")
+        ax.set_yticks([0, 10, 20, 30, 40])
+        ax.set_yticklabels([0, 10, 20, 30, 40], color=C["muted"])
+        if len(y): ax.set_ylim(-2, max(45, y.max() * 1.3))
+        fig.tight_layout(pad=1.0)
+
+        cv = FigureCanvasTkAgg(fig, parent)
+        cv.draw()
+        cv.get_tk_widget().pack(fill="x", padx=20, pady=(5, 5))
+        plt.close(fig)
+
+        # Legend strip
+        leg = ctk.CTkFrame(parent, fg_color="transparent")
+        leg.pack(fill="x", padx=30, pady=(0, 18))
+        ctk.CTkFrame(leg, width=18, height=2, fg_color=C["purple"]).pack(side="left", pady=(0, 1), padx=(0, 8))
+        ctk.CTkLabel(leg, text="This Week",         font=TINY, text_color=C["white"]).pack(side="left", padx=(0, 20))
+        ctk.CTkLabel(leg, text="-- --",             font=TINY, text_color=C["purple"]).pack(side="left", padx=(0, 8))
+        ctk.CTkLabel(leg, text="No Attendance / No Data", font=TINY, text_color=C["muted"]).pack(side="left")
+        ctk.CTkLabel(leg, text="ⓘ Tap a day to view detail", font=TINY, text_color=C["muted"]).pack(side="right")
+
+    # ── Students ──────────────────────────────────────────────────────────────
+
+    def show_students(self):
+        self._clear()
+        self._nav("Students")
+        page = self._page()
+
+        hdr = self._header(page, "Students", "Manage your student roster")
+        GhostBtn(hdr, text="Import Data",   width=130, command=self._import_data).pack(side="right")
+        Btn(hdr,      text="+ Add Student", width=140, command=self.show_add_student).pack(side="right", padx=(0, 10))
+
+        self.st_query = Field(page, placeholder_text="🔍  Search by name, roll, or GR number")
+        self.st_query.pack(fill="x", padx=40, pady=(0, 15))
+        self.st_query.bind("<KeyRelease>", lambda e: self._render_students())
+
+        self.st_card = Card(page)
+        self.st_card.pack(fill="both", expand=True, padx=40, pady=(0, 40))
+        self.st_scroll = ctk.CTkScrollableFrame(self.st_card, fg_color="transparent")
+        self.st_scroll.pack(fill="both", expand=True, padx=10, pady=10)
+        self._render_students()
+
+    def _render_students(self):
+        for w in self.st_scroll.winfo_children():
+            w.destroy()
+        q = self.st_query.get().strip() if hasattr(self, "st_query") else ""
+        students = self.db.get_all_students(q or None)
+        if not students:
+            ctk.CTkLabel(self.st_scroll, text="No students found.", text_color=C["muted"]).pack(pady=40)
+            return
+        for sid, grno, rollno, name, std, sec, gen, ph, _ in students[:60]:
+            self._student_row(sid, grno, rollno, name, std, sec)
+
+    def _student_row(self, sid, grno, rollno, name, std, sec):
+        row = Card(self.st_scroll, height=65)
+        row.pack(fill="x", pady=4, padx=5)
+
+        av = ctk.CTkFrame(row, fg_color=C["border"], width=40, height=40, corner_radius=20)
+        av.pack(side="left", padx=15, pady=12)
+        av.pack_propagate(False)
+        ctk.CTkLabel(av, text="👤", text_color=C["muted"]).pack(expand=True)
+
+        ctk.CTkLabel(row, text=name, font=BOLD, text_color=C["white"], width=180, anchor="w").pack(side="left")
         
-        total_pages = max(1, -(-total // page_size))  # ceiling division
-        info = ctk.CTkLabel(self.student_page_bar,
-                            text=f"Showing {start + 1}–{min(start + page_size, total)} of {total} students  |  Page {page + 1} of {total_pages}",
-                            font=("Segoe UI", 12), text_color=THEME["text_secondary"])
-        info.pack(side="left", padx=5)
+        info_text = f"Class {std} - {sec}   •   GR No: {grno}   •   Roll No: {rollno}"
+        ctk.CTkLabel(row, text=info_text, font=SMALL, text_color=C["muted"], anchor="w").pack(side="left", padx=20)
+
+        GhostBtn(row, text="Delete", width=70, height=30, text_color=C["red"], border_color=C["red"],
+                 command=lambda s=sid, n=name: self._del_student(s, n)).pack(side="right", padx=(0, 15))
+        GhostBtn(row, text="Edit", width=60, height=30,
+                 command=lambda s=sid: self.show_edit_student(s)).pack(side="right", padx=5)
+
+    def show_add_student(self):
+        self._clear()
+        self._nav("Students")
+        page = self._page()
+        form = self._form(page, "Add New Student")
+
+        fields = {}
+        labels = [("GR Number","grno",0), ("Roll Number","rollno",1),
+                  ("Full Name","name",2), ("Gender (M/F)","gender",3), ("Phone Number","phoneno",4)]
+        for label, key, row_idx in labels:
+            ctk.CTkLabel(form, text=label, font=BOLD, text_color=C["white"]).grid(row=row_idx, column=0, padx=10, pady=10, sticky="w")
+            e = Field(form, width=300)
+            e.grid(row=row_idx, column=1, padx=10, pady=10)
+            fields[key] = e
+
+        ctk.CTkLabel(form, text="Class", font=BOLD, text_color=C["white"]).grid(row=5, column=0, padx=10, pady=10, sticky="w")
+        classes = self.db.get_all_classes()
+        cnames  = [cl[1] for cl in classes] if classes else ["Default"]
+        cls_var = ctk.StringVar(value=cnames[0])
+        ctk.CTkComboBox(form, values=cnames, variable=cls_var, width=300,
+                        fg_color=C["card"], border_color=C["border"],
+                        button_color=C["purple"]).grid(row=5, column=1, padx=10, pady=10)
+
+        def save():
+            try:
+                g  = fields["grno"].get().strip()
+                ro = fields["rollno"].get().strip()
+                n  = fields["name"].get().strip()
+                ge = fields["gender"].get().strip().upper()
+                ph = fields["phoneno"].get().strip()
+                for v, lbl in [(g,"GR"),(ro,"Roll"),(n,"Name"),(ge,"Gender"),(ph,"Phone")]:
+                    if not v: return Toast(self, f"{lbl} is required", "error")
+                if ge not in ("M", "F"): return Toast(self, "Gender must be M or F", "error")
+                std, sec = _parse_class_name(cls_var.get())
+                cid = self.db.get_class_id_by_name(cls_var.get()) or 1
+                sid = self.db.add_student(int(g), int(ro), n, std, sec, ge, ph, cid)
+                Toast(self, f"Look at the camera — capturing {n}", "info")
+                if self.bk.record_face(n):
+                    Toast(self, f"{n} added!", "success")
+                else:
+                    self.db.delete_student(sid)
+                    Toast(self, "Face capture cancelled", "warning")
+                self.show_students()
+            except Exception as ex:
+                Toast(self, str(ex), "error")
+
+        btns = ctk.CTkFrame(form, fg_color="transparent")
+        btns.grid(row=6, column=0, columnspan=2, pady=25)
+        Btn(btns,      text="💾 Save & Capture Face", width=220, command=save).pack(side="left", padx=8)
+        GhostBtn(btns, text="Cancel", width=110, command=self.show_students).pack(side="left", padx=8)
+
+    def show_edit_student(self, sid):
+        student = self.db.get_student_by_id(sid)
+        if not student: return Toast(self, "Student not found", "error")
+
+        self._clear()
+        self._nav("Students")
+        page = self._page()
+        form = self._form(page, f"Edit — {student[3]}")
+
+        keys   = ["grno","rollno","name","gender","phoneno"]
+        labels = ["GR Number","Roll Number","Full Name","Gender (M/F)","Phone Number"]
         
-        if page > 0:
-            ModernButton(self.student_page_bar, text="◀ Previous", width=110, height=32,
-                         fg_color=THEME["card_bg"], hover_color=THEME["card_hover"],
-                         command=self._students_prev_page).pack(side="right", padx=5)
-        if (page + 1) < total_pages:
-            ModernButton(self.student_page_bar, text="Next ▶", width=90, height=32,
-                         fg_color=THEME["accent_purple"], hover_color=THEME["accent_blue"],
-                         command=self._students_next_page).pack(side="right", padx=5)
-    
-    def _students_next_page(self):
-        self.student_page += 1
-        self.load_students()
-    
-    def _students_prev_page(self):
-        self.student_page -= 1
-        self.load_students()
-    
-    def create_student_card(self, student):
-        sid, grno, rollno, name, std, section, gender, phoneno, photopath = student
-        
-        card = ctk.CTkFrame(
-            self.students_container,
-            fg_color=THEME["card_bg"],
-            corner_radius=12,
-            height=90
-        )
-        card.pack(fill="x", pady=4)
-        
-        # Photo / Avatar
-        photo_frame = ctk.CTkFrame(card, fg_color=THEME["bg_tertiary"], width=70, height=70, corner_radius=10)
-        photo_frame.pack(side="left", padx=12, pady=10)
-        photo_frame.pack_propagate(False)
-        ctk.CTkLabel(
-            photo_frame,
-            text="👤" if str(gender).upper().startswith("M") else "👩",
-            font=("Segoe UI", 32)
-        ).pack(expand=True)
-        
-        # Info
-        info_frame = ctk.CTkFrame(card, fg_color="transparent")
-        info_frame.pack(side="left", fill="both", expand=True, padx=10, pady=8)
-        
-        ctk.CTkLabel(
-            info_frame,
-            text=name,
-            font=("Segoe UI", 16, "bold"),
-            text_color=THEME["text_primary"],
-            anchor="w"
-        ).pack(anchor="w")
-        
-        ctk.CTkLabel(
-            info_frame,
-            text=f"GR: {grno} | Roll: {rollno} | Class: {std}-{section} | {gender} | {phoneno}",
-            font=("Segoe UI", 12),
-            text_color=THEME["text_secondary"],
-            anchor="w"
-        ).pack(anchor="w", pady=2)
-        
-        # Actions
-        actions = ctk.CTkFrame(card, fg_color="transparent")
-        actions.pack(side="right", padx=15)
-        
-        ModernButton(
-            actions,
-            text="✏ Edit",
-            width=80,
-            height=35,
-            fg_color=THEME["info"],
-            command=lambda s=sid: self.edit_student_dialog(s)
-        ).pack(side="left", padx=5)
-        
-        ModernButton(
-            actions,
-            text="🗑 Delete",
-            width=80,
-            height=35,
-            fg_color=THEME["danger"],
-            command=lambda s=sid, n=name: self.delete_student(s, n)
-        ).pack(side="left", padx=5)
-    
-    def show_add_student_inline(self):
-        self.clear_content()
-        
-        # Header
-        header = ctk.CTkFrame(self.content_area, fg_color="transparent", height=80)
-        header.pack(fill="x", padx=30, pady=20)
-        ctk.CTkLabel(
-            header,
-            text="➕ Add New Student",
-            font=("Segoe UI", 32, "bold"),
-            text_color=THEME["text_primary"],
-        ).pack(side="left")
-        
-        # Center container to constrain width
-        center_container = ctk.CTkFrame(self.content_area, fg_color="transparent")
-        center_container.pack(fill="both", expand=True, padx=30, pady=(0, 30))
-        
-        # Calculate responsive padding (15% of window width, min 100px)
-        window_width = self.winfo_width()
-        side_padding = max(100, int(window_width * 0.15))
-        
-        # Scrollable card with reduced width
-        scroll_container = ModernCard(center_container)
-        scroll_container.pack(fill="both", expand=True, padx=side_padding, pady=0)
-        
-        scroll_frame = ctk.CTkScrollableFrame(scroll_container, fg_color="transparent")
-        scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        form_card = ctk.CTkFrame(scroll_frame, fg_color="transparent")
-        form_card.pack(fill="both", expand=True, padx=20, pady=20)
+        # Mapping student tuple: 
+        # (id, grno, rollno, name, std, section, gender, phoneno, photo, class_id)
+        # 0   1     2       3     4    5        6       7        8      9
+        field_indices = {"grno": 1, "rollno": 2, "name": 3, "gender": 6, "phoneno": 7}
         
         fields = {}
-        
-        def add_field(label_text, key, row):
-            ctk.CTkLabel(
-                form_card,
-                text=label_text,
-                font=("Segoe UI", 14, "bold"),
-                text_color=THEME["text_primary"],
-            ).grid(row=row, column=0, padx=10, pady=15, sticky="w")
-            
-            # Reduced width from 400 to 280 (30% reduction)
-            entry = ModernEntry(form_card, width=280)
-            entry.grid(row=row, column=1, padx=10, pady=15, sticky="w")
-            fields[key] = entry
-        
-        # All form fields
-        add_field("GR Number", "grno", 0)
-        add_field("Roll Number", "rollno", 1)
-        add_field("Full Name", "name", 2)
-        add_field("Standard (Class)", "std", 3)
-        add_field("Section", "section", 4)
-        add_field("Gender (M/F)", "gender", 5)
-        add_field("Phone Number", "phoneno", 6)
-        
-        # Class dropdown
-        ctk.CTkLabel(
-            form_card,
-            text="Class/Batch",
-            font=("Segoe UI", 14, "bold"),
-            text_color=THEME["text_primary"],
-        ).grid(row=7, column=0, padx=10, pady=15, sticky="w")
-        
+        for i, (label, key) in enumerate(zip(labels, keys)):
+            ctk.CTkLabel(form, text=label, font=BOLD, text_color=C["white"]).grid(row=i, column=0, padx=10, pady=10, sticky="w")
+            e = Field(form, width=300)
+            e.insert(0, str(student[field_indices[key]]))
+            e.grid(row=i, column=1, padx=10, pady=10)
+            fields[key] = e
+
+        ctk.CTkLabel(form, text="Class", font=BOLD, text_color=C["white"]).grid(row=5, column=0, padx=10, pady=10, sticky="w")
         classes = self.db.get_all_classes()
-        classnames = [c[1] for c in classes] if classes else ["Default Class"]
-        classvar = ctk.StringVar(value=classnames[0])
+        cnames  = [cl[1] for cl in classes] if classes else ["Default"]
         
-        class_dropdown = ctk.CTkComboBox(
-            form_card,
-            values=classnames,
-            variable=classvar,
-            width=280,
-            state="readonly",
-            fg_color=THEME["card_bg"],
-            button_color=THEME["accent_purple"],
-            button_hover_color=THEME["accent_blue"],
-        )
-        class_dropdown.grid(row=7, column=1, padx=10, pady=15, sticky="w")
-        
-        # Button frame
-        btn_frame = ctk.CTkFrame(form_card, fg_color="transparent")
-        btn_frame.grid(row=8, column=0, columnspan=2, pady=30, sticky="ew")
-        
-        def save_student():
+        current_class_id = student[9]
+        current_class_name = cnames[0]
+        for cid, cname in classes:
+            if cid == current_class_id:
+                current_class_name = cname
+                break
+                
+        cls_var = ctk.StringVar(value=current_class_name)
+        ctk.CTkComboBox(form, values=cnames, variable=cls_var, width=300,
+                        fg_color=C["card"], border_color=C["border"],
+                        button_color=C["purple"]).grid(row=5, column=1, padx=10, pady=10)
+
+        def update():
             try:
-                # Get all field values
-                grno = fields["grno"].get().strip()
-                rollno = fields["rollno"].get().strip()
-                name = fields["name"].get().strip()
-                std = fields["std"].get().strip()
-                section = fields["section"].get().strip().upper()
-                gender = fields["gender"].get().strip().upper()
-                phoneno = fields["phoneno"].get().strip()  # ← FIXED: was self.phone_entry
-                
-                # ====== VALIDATION (Bug 6 Fix) ======
-                
-                # Check empty fields
-                if not grno:
-                    Toast(self, "❌ GR Number is required", "error")
-                    return
-                
-                if not rollno:
-                    Toast(self, "❌ Roll Number is required", "error")
-                    return
-                
-                if not name:
-                    Toast(self, "❌ Student Name is required", "error")
-                    return
-                
-                if not std:
-                    Toast(self, "❌ Standard/Class is required", "error")
-                    return
-                
-                if not section:
-                    Toast(self, "❌ Section is required", "error")
-                    return
-                
-                if not gender:
-                    Toast(self, "❌ Gender is required", "error")
-                    return
-                
-                if not phoneno:
-                    Toast(self, "❌ Phone Number is required", "error")
-                    return
-                
-                # Validate number formats
-                if not grno.isdigit():
-                    Toast(self, "❌ GR Number must contain only digits", "error")
-                    return
-                
-                if not rollno.isdigit():
-                    Toast(self, "❌ Roll Number must contain only digits", "error")
-                    return
-                
-                if not std.isdigit():
-                    Toast(self, "❌ Standard must be a number", "error")
-                    return
-                
-                # Validate gender
-                if gender not in ['M', 'F']:
-                    Toast(self, "❌ Gender must be M (Male) or F (Female)", "error")
-                    return
-                
-                # Validate phone number
-                phone_digits = ''.join(filter(str.isdigit, phoneno))
-                if len(phone_digits) != 10:
-                    Toast(self, "❌ Phone number must be 10 digits", "error")
-                    return
-                
-                # ====== END VALIDATION ======
-                
-                # Convert to proper types
-                grno = int(grno)
-                rollno = int(rollno)
-                std = int(std)
-                
-                # Get class ID
-                classid = self.db.get_class_id_by_name(classvar.get())
-                if not classid:
-                    classid = 1  # Default class fallback
-                
-                # Add student to database — keep the returned ID so we can roll back if needed
-                student_id = self.db.add_student(grno, rollno, name, std, section, gender, phoneno, classid)
-                
-                Toast(self, f"Recording face for {name}. Look at the camera!", "info")
-                success = self.backend.record_face(name)
-                
-                if success:
-                    Toast(self, f"✓ Student {name} added successfully!", "success")
-                    self.show_students()
-                else:
-                    # Face capture was cancelled — remove the student record so DB stays clean
-                    self.db.delete_student(student_id)
-                    Toast(self, f"Cancelled — {name} was not added.", "warning")
-                    self.show_students()
-                    
-            except ValueError as e:
-                Toast(self, f"❌ Invalid number format: {str(e)}", "error")
-            except Exception as e:
-                Toast(self, f"❌ Error: {str(e)}", "error")
-        
-        ModernButton(
-            btn_frame,
-            text="💾 Save & Capture Face",
-            fg_color=THEME["accent_purple"],
-            hover_color=THEME["accent_blue"],
-            command=save_student,
-            width=200,
-            height=50,
-        ).pack(side="right", padx=10)
-        
-        ModernButton(
-            btn_frame,
-            text="Cancel",
-            fg_color=THEME["card_bg"],
-            hover_color=THEME["card_hover"],
-            command=self.show_students,
-            width=120,
-            height=50,
-        ).pack(side="right", padx=10)
-
-    def edit_student_dialog(self, student_id):
-            """Show edit student interface inline (replaces current view)."""
-            student = self.db.get_student_by_id(student_id)
-            if not student:
-                Toast(self, "Student not found!", "error")
-                return
-                
-            # Clear the main content area to show this form inline
-            self.clear_content()
-            
-            # Header
-            header = ctk.CTkFrame(self.content_area, fg_color="transparent", height=80)
-            header.pack(fill="x", padx=30, pady=20)
-            ctk.CTkLabel(
-                header,
-                text=f"✏ Edit Student: {student[3]}",
-                font=("Segoe UI", 32, "bold"),
-                text_color=THEME["text_primary"],
-            ).pack(side="left")
-
-            # Center container for responsive width (similar to Add Student)
-            center_container = ctk.CTkFrame(self.content_area, fg_color="transparent")
-            center_container.pack(fill="both", expand=True, padx=30, pady=(0, 30))
-            
-            # Calculate responsive padding
-            window_width = self.winfo_width()
-            side_padding = max(100, int(window_width * 0.15))
-
-            # Main Scrollable Card
-            scroll_container = ModernCard(center_container)
-            scroll_container.pack(fill="both", expand=True, padx=side_padding, pady=0)
-            
-            scroll_frame = ctk.CTkScrollableFrame(scroll_container, fg_color="transparent")
-            scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
-            
-            form_card = ctk.CTkFrame(scroll_frame, fg_color="transparent")
-            form_card.pack(fill="both", expand=True, padx=20, pady=20)
-            
-            # Prepare Data
-            fields = {}
-            data = {
-                "grno": student[1],
-                "rollno": student[2],
-                "name": student[3],
-                "std": student[4],
-                "section": student[5],
-                "gender": student[6],
-                "phoneno": student[7],
-            }
-            
-            labels = [
-                ("GR Number", "grno"),
-                ("Roll Number", "rollno"),
-                ("Full Name", "name"),
-                ("Standard", "std"),
-                ("Section", "section"),
-                ("Gender (M/F)", "gender"),
-                ("Phone Number", "phoneno"),
-            ]
-            
-            # Generate Fields
-            for i, (label, key) in enumerate(labels):
-                ctk.CTkLabel(
-                    form_card,
-                    text=label,
-                    font=("Segoe UI", 14, "bold"),
-                    text_color=THEME["text_primary"],
-                ).grid(row=i, column=0, padx=10, pady=15, sticky="w")
-                
-                entry = ModernEntry(form_card, width=280)
-                entry.insert(0, str(data[key]))
-                entry.grid(row=i, column=1, padx=10, pady=15, sticky="w")
-                fields[key] = entry
-                
-            # Button frame
-            btn_frame = ctk.CTkFrame(form_card, fg_color="transparent")
-            btn_frame.grid(row=len(labels)+1, column=0, columnspan=2, pady=30, sticky="ew")
-            
-            def update_student():
-                try:
-                    # Basic validation
-                    if not fields["name"].get().strip():
-                        Toast(self, "Name is required!", "error")
-                        return
-
-                    self.db.update_student(
-                        student_id,
-                        int(fields["grno"].get()),
-                        int(fields["rollno"].get()),
-                        fields["name"].get().strip(),
-                        int(fields["std"].get()),
-                        fields["section"].get().upper().strip(),
-                        fields["gender"].get().upper().strip(),
-                        fields["phoneno"].get().strip()
-                    )
-                    Toast(self, "Student updated successfully!", "success")
-                    # Return to student list
-                    self.show_students()
-                except ValueError:
-                    Toast(self, "Invalid number format in fields!", "error")
-                except Exception as e:
-                    Toast(self, f"Error: {str(e)}", "error")
-            
-            def cancel():
+                std, sec = _parse_class_name(cls_var.get())
+                cid = self.db.get_class_id_by_name(cls_var.get()) or 1
+                self.db.update_student(
+                    sid,
+                    int(fields["grno"].get()),
+                    int(fields["rollno"].get()),
+                    fields["name"].get().strip(),
+                    std,
+                    sec,
+                    fields["gender"].get().upper().strip(),
+                    fields["phoneno"].get().strip(),
+                    cid
+                )
+                Toast(self, "Student updated!", "success")
                 self.show_students()
-            
-            ModernButton(
-                btn_frame,
-                text="💾 Update Student",
-                fg_color=THEME["accent_purple"],
-                hover_color=THEME["accent_blue"],
-                command=update_student,
-                width=200,
-                height=50,
-            ).pack(side="right", padx=10)
-            
-            ModernButton(
-                btn_frame,
-                text="Cancel",
-                fg_color=THEME["card_bg"],
-                hover_color=THEME["card_hover"],
-                command=cancel,
-                width=120,
-                height=50,
-            ).pack(side="right", padx=10)        
-    def delete_student(self, student_id, name):
-        result = messagebox.askyesno(
-            "Confirm Delete",
-            f"Are you sure you want to delete {name}?\n\nThis will also delete all attendance records."
-        )
-        if result:
+            except Exception as ex:
+                Toast(self, str(ex), "error")
+
+        btns = ctk.CTkFrame(form, fg_color="transparent")
+        btns.grid(row=6, column=0, columnspan=2, pady=25)
+        Btn(btns,      text="💾 Update Student", width=200, command=update).pack(side="left", padx=8)
+        GhostBtn(btns, text="Cancel", width=110, command=self.show_students).pack(side="left", padx=8)
+
+    def _del_student(self, sid, name):
+        if messagebox.askyesno("Delete Student", f"Delete {name}?\nThis also removes their face data."):
+            self.db.delete_student(sid)
             try:
-                self.db.delete_student(student_id)
-                self.backend.delete_face_data(name)
-                Toast(self, f"Student {name} deleted successfully!", "success")
-                self.load_students()
-            except Exception as e:
-                Toast(self, f"Error: {str(e)}", "error")
-    
-    def bulk_import_dialog(self):
-        filepath = filedialog.askopenfilename(
-            title="Select CSV File",
-            filetypes=[("CSV Files", "*.csv")]
-        )
-        
-        if not filepath:
-            return
-        
+                self.bk.delete_face_data(name)
+            except Exception:
+                pass
+            Toast(self, f"{name} deleted", "success")
+            self._render_students()
+
+    def _import_data(self):
+        fp = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
+        if not fp: return
         try:
-            with open(filepath, 'r') as f:
-                reader = csv.DictReader(f)
-                students_data = list(reader)
-            
-            count = self.db.bulk_import_students(students_data)
-            Toast(self, f"Successfully imported {count} students!", "success")
-            self.load_students()
-        except Exception as e:
-            Toast(self, f"Import error: {str(e)}", "error")
-    
+            with open(fp, newline="") as f:
+                data = list(csv.DictReader(f))
+            n = self.db.bulk_import_students(data)
+            Toast(self, f"Imported {n} students", "success")
+            self._render_students()
+        except Exception as ex:
+            Toast(self, str(ex), "error")
+
+    # ── Attendance ────────────────────────────────────────────────────────────
+
     def show_attendance(self):
-        self.clear_content()
-        self.set_active_nav("Attendance")
-        
-        # Header
-        header = ctk.CTkFrame(self.content_area, fg_color="transparent", height=80)
-        header.pack(fill="x", padx=30, pady=20)
-        ctk.CTkLabel(
-            header,
-            text="✓ Mark Attendance",
-            font=("Segoe UI", 32, "bold"),
-            text_color=THEME["text_primary"],
-        ).pack(side="left")
-        
-        # Info cards
-        info_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
-        info_frame.pack(fill="x", padx=30, pady=10)
-        
-        total = self.db.get_student_count()
-        present = self.db.get_attendance_count_today()
-        
-        stats = [
-            ("Date", datetime.date.today().strftime("%B %d, %Y"), THEME["accent_purple"]),
-            ("Total Students", str(total), THEME["accent_blue"]),
-            ("Present", str(present), THEME["success"]),
-            ("Absent", str(total - present), THEME["danger"]),
-        ]
-        
-        for i, (label, value, color) in enumerate(stats):
-            card = ModernCard(info_frame)
-            card.grid(row=0, column=i, padx=10, sticky="ew")
-            info_frame.grid_columnconfigure(i, weight=1)
-            
-            ctk.CTkLabel(card, text=value, font=("Segoe UI", 28, "bold"), text_color=color).pack(pady=(20, 5))
-            ctk.CTkLabel(card, text=label, font=("Segoe UI", 13), text_color=THEME["text_secondary"]).pack(pady=(0, 20))
-        
+        self._clear()
+        self._nav("Attendance")
+        page = self._page()
+
+        hdr = self._header(page, "Take Attendance", "Face recognition attendance marking")
+
+        # Live stats row
+        ts = self.db.get_student_count()
+        tp = self.db.get_attendance_count_today()
+        kpi_row = ctk.CTkFrame(page, fg_color="transparent")
+        kpi_row.pack(fill="x", padx=40, pady=(0, 25))
+        for i, (val, label, col) in enumerate([
+            (datetime.date.today().strftime("%d %b %Y"), "Today's Date",   C["white"]),
+            (str(ts),    "Total Students", C["purple"]),
+            (str(tp),    "Present Today",  C["green"]),
+            (str(ts-tp), "Yet to Mark",    C["gold"]),
+        ]):
+            card = Card(kpi_row, height=80)
+            card.grid(row=0, column=i, padx=(0, 15) if i < 3 else 0, sticky="ew")
+            card.pack_propagate(False)
+            kpi_row.grid_columnconfigure(i, weight=1)
+            ctk.CTkLabel(card, text=val,   font=("Segoe UI", 20, "bold"), text_color=col).pack(pady=(16, 2))
+            ctk.CTkLabel(card, text=label, font=TINY, text_color=C["muted"]).pack()
+
         # Action card
-        action_card = ModernCard(self.content_area)
-        action_card.pack(fill="both", expand=True, padx=30, pady=(10, 30))
-        
-        ctk.CTkLabel(
-            action_card,
-            text="📷 Start Face Recognition",
-            font=("Segoe UI", 24, "bold"),
-            text_color=THEME["text_primary"],
-        ).pack(pady=40)
-        
-        ctk.CTkLabel(
-            action_card,
-            text="Click the button below to start marking attendance using face recognition",
-            font=("Segoe UI", 14),
-            text_color=THEME["text_secondary"],
-        ).pack(pady=10)
-        
-        ModernButton(
-            action_card,
-            text="🎥 Start Recognition",
-            width=250,
-            height=60,
-            font=("Segoe UI", 18, "bold"),
-            fg_color=THEME["accent_purple"],
-            hover_color=THEME["accent_blue"],
-            command=self.start_face_recognition,
-        ).pack(pady=30)
-        
-        ctk.CTkLabel(
-            action_card,
-            text="Instructions:",
-            font=("Segoe UI", 14, "bold"),
-            text_color=THEME["text_primary"],
-        ).pack(pady=(20, 5))
-        
-        instructions = [
-            "• Position your face in front of the camera",
-            "• Press 'M' to mark attendance when recognized",
-            "• Press 'Q' to stop and exit",
-        ]
-        
-        for inst in instructions:
-            ctk.CTkLabel(
-                action_card,
-                text=inst,
-                font=("Segoe UI", 13),
-                text_color=THEME["text_secondary"],
-            ).pack(pady=2)
-    
-    def start_face_recognition(self):
-        marked = self.backend.recognize_and_mark_attendance(self.db)
-        if marked is None:
-            Toast(self, "No face data found! Please add students first.", "warning")
-        else:
-            # Speak a message when attendance flow ends
-            if marked:  # at least one student marked
-                self.backend.speak("Attendance marked successfully")
+        action_card = Card(page)
+        action_card.pack(fill="both", expand=True, padx=40, pady=(0, 40))
+        centre = ctk.CTkFrame(action_card, fg_color="transparent")
+        centre.place(relx=0.5, rely=0.5, anchor="center")
+        ctk.CTkLabel(centre, text="📷", font=("Segoe UI", 64)).pack(pady=(0, 15))
+        ctk.CTkLabel(centre, text="Ready to Mark Attendance", font=HEAD, text_color=C["white"]).pack(pady=(0, 8))
+        ctk.CTkLabel(centre, text="Press Start — the camera opens. Press M to mark, Q to quit.",
+                     font=BODY, text_color=C["muted"]).pack(pady=(0, 30))
+
+        def start():
+            result = self.bk.recognize_and_mark_attendance(self.db)
+            if result is None:
+                Toast(self, "No face data found. Add students first.", "warning")
             else:
-                self.backend.speak("No attendance was marked")
-            Toast(self, "Attendance marking completed!", "success")
-            self.show_attendance()
-    
+                try:
+                    self.bk.speak("Attendance marked" if result else "No attendance marked")
+                except Exception:
+                    pass
+                Toast(self, "Session complete!", "success")
+                self.show_attendance()
+
+        Btn(centre, text="▶  Start Face Recognition", width=250, command=start).pack()
+
+    # ── Reports ───────────────────────────────────────────────────────────────
+
     def show_reports(self):
-        self.clear_content()
-        self.set_active_nav("Reports")
-        
-        # Header
-        header = ctk.CTkFrame(self.content_area, fg_color="transparent", height=80)
-        header.pack(fill="x", padx=30, pady=20)
-        ctk.CTkLabel(
-            header,
-            text="📊 Attendance Reports",
-            font=("Segoe UI", 32, "bold"),
-            text_color=THEME["text_primary"],
-        ).pack(side="left")
-        
-        # Filters Card
-        filter_card = ModernCard(self.content_area)
-        filter_card.pack(fill="x", padx=30, pady=(0, 10))
-        
-        ctk.CTkLabel(
-            filter_card,
-            text="Filter Options",
-            font=("Segoe UI", 18, "bold"),
-            text_color=THEME["text_primary"],
-        ).pack(anchor="w", padx=20, pady=(15, 5))
-        
-        filter_frame = ctk.CTkFrame(filter_card, fg_color="transparent")
-        filter_frame.pack(fill="x", padx=20, pady=(0, 15))
-        
-        # ROW 0: Name filter
-        ctk.CTkLabel(
-            filter_frame,
-            text="Student Name",
-            font=("Segoe UI", 13),
-            text_color=THEME["text_secondary"],
-        ).grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        
-        self.report_name = ModernEntry(filter_frame, placeholder_text="Search by name (optional)", width=250)
-        self.report_name.grid(row=0, column=1, padx=10, pady=10, columnspan=2, sticky="ew")
-        
-        # ROW 1: Date filters
-        ctk.CTkLabel(
-            filter_frame,
-            text="From Date",
-            font=("Segoe UI", 13),
-            text_color=THEME["text_secondary"],
-        ).grid(row=1, column=0, padx=10, pady=10, sticky="w")
-        
-        self.report_from_date = ModernEntry(filter_frame, width=150)
-        self.report_from_date.insert(0, str(datetime.date.today() - datetime.timedelta(days=7)))
-        self.report_from_date.grid(row=1, column=1, padx=10, pady=10, sticky="w")
-        
-        ctk.CTkLabel(
-            filter_frame,
-            text="To Date",
-            font=("Segoe UI", 13),
-            text_color=THEME["text_secondary"],
-        ).grid(row=1, column=2, padx=10, pady=10, sticky="w")
-        
-        self.report_to_date = ModernEntry(filter_frame, width=150)
-        self.report_to_date.insert(0, str(datetime.date.today()))
-        self.report_to_date.grid(row=1, column=3, padx=10, pady=10, sticky="w")
-        
-        # Apply button - spanning both rows on the right
-        ModernButton(
-            filter_frame,
-            text="🔍 Apply Filter",
-            fg_color=THEME["accent_purple"],
-            hover_color=THEME["accent_blue"],
-            command=self._reports_apply_filter,
-            width=140,
-            height=45,
-        ).grid(row=0, column=4, rowspan=2, padx=15, pady=10)
-        
-        # Results Card
-        results_card = ModernCard(self.content_area)
-        results_card.pack(fill="both", expand=True, padx=30, pady=(0, 30))
-        
-        header_frame = ctk.CTkFrame(results_card, fg_color="transparent")
-        header_frame.pack(fill="x", padx=20, pady=(15, 10))
-        ctk.CTkLabel(header_frame, text="📋 Report Results",
-                     font=("Segoe UI", 20, "bold"), text_color=THEME["text_primary"]).pack(side="left")
-        
-        self.results_count_label = ctk.CTkLabel(
-            header_frame, text="0 records", font=("Segoe UI", 12, "bold"),
-            text_color=THEME["accent_purple"], fg_color=THEME["bg_tertiary"],
-            corner_radius=15, padx=15, pady=5)
-        self.results_count_label.pack(side="right")
-        
-        self.reports_container = ctk.CTkScrollableFrame(results_card, fg_color="transparent")
-        self.reports_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        
-        # Bottom bar: pagination on left, export on right
-        bottom_bar = ctk.CTkFrame(results_card, fg_color="transparent")
-        bottom_bar.pack(fill="x", padx=20, pady=(0, 15))
-        
-        self.report_page_bar = ctk.CTkFrame(bottom_bar, fg_color="transparent")
-        self.report_page_bar.pack(side="left", fill="x", expand=True)
-        
-        ModernButton(bottom_bar, text="📥 Download", fg_color=THEME["success"],
-                     command=self.export_reports, width=150).pack(side="right")
-        
-        # Pagination state — reset when Apply Filter is clicked
-        self.report_page = 0
-        self.report_page_size = 30
-        self.load_reports()
-    
-    def _reports_apply_filter(self):
-        # Reset to page 1 when a new filter is applied
-        self.report_page = 0
-        self.load_reports()
+        self._clear()
+        self._nav("Reports")
+        page = self._page()
 
-    def load_reports(self):
-        for widget in self.reports_container.winfo_children():
-            widget.destroy()
-        
-        name = self.report_name.get().strip() if hasattr(self, "report_name") else ""
-        from_date = self.report_from_date.get().strip()
-        to_date = self.report_to_date.get().strip()
-        
-        try:
-            # Pass name as-is — db_logic wraps it in wildcards already
-            all_records = self.db.get_attendance_reports(from_date, to_date, name if name else None)
-        except Exception as e:
-            Toast(self, f"Error loading reports: {str(e)}", "error")
-            return
-        
-        total = len(all_records)
-        page = getattr(self, "report_page", 0)
-        page_size = getattr(self, "report_page_size", 30)
-        start = page * page_size
-        records = all_records[start:start + page_size]
-        
-        self.results_count_label.configure(text=f"{total} records")
-        
-        if not all_records:
-            empty_frame = ctk.CTkFrame(self.reports_container, fg_color=THEME["bg_tertiary"], corner_radius=12)
-            empty_frame.pack(fill="both", expand=True, pady=40, padx=20)
-            ctk.CTkLabel(empty_frame, text="📭", font=("Segoe UI", 48)).pack(pady=(40, 10))
-            ctk.CTkLabel(empty_frame, text="No records found", font=("Segoe UI", 18, "bold"),
-                         text_color=THEME["text_secondary"]).pack(pady=(0, 5))
-            ctk.CTkLabel(empty_frame, text="Try adjusting your filters", font=("Segoe UI", 13),
-                         text_color=THEME["text_tertiary"]).pack(pady=(0, 40))
-        else:
-            for rec_name, grno, rollno, class_section, date, time, status in records:
-                self._create_report_card(rec_name, grno, rollno, class_section, date, time, status)
-        
-        # Rebuild pagination bar
-        for w in self.report_page_bar.winfo_children():
-            w.destroy()
-        
-        total_pages = max(1, -(-total // page_size))
-        ctk.CTkLabel(self.report_page_bar,
-                     text=f"Showing {start + 1}–{min(start + page_size, total)} of {total}  |  Page {page + 1} of {total_pages}",
-                     font=("Segoe UI", 12), text_color=THEME["text_secondary"]).pack(side="left", padx=5)
-        
-        if page > 0:
-            ModernButton(self.report_page_bar, text="◀ Prev", width=90, height=32,
-                         fg_color=THEME["card_bg"], hover_color=THEME["card_hover"],
-                         command=self._reports_prev_page).pack(side="left", padx=5)
-        if (page + 1) < total_pages:
-            ModernButton(self.report_page_bar, text="Next ▶", width=90, height=32,
-                         fg_color=THEME["accent_purple"], hover_color=THEME["accent_blue"],
-                         command=self._reports_next_page).pack(side="left", padx=5)
-    
-    def _reports_next_page(self):
-        self.report_page += 1
-        self.load_reports()
-    
-    def _reports_prev_page(self):
-        self.report_page -= 1
-        self.load_reports()
-    
-    def _create_report_card(self, name, grno, rollno, class_section, date, time, status):
-        status_color = THEME["success"] if status == "P" else THEME["danger"]
-        
-        card = ctk.CTkFrame(self.reports_container, fg_color=THEME["card_bg"], corner_radius=10, height=80)
-        card.pack(fill="x", pady=4, padx=5)
-        
-        # Colored left bar indicates attendance status at a glance
-        ctk.CTkFrame(card, fg_color=status_color, width=5, corner_radius=10).pack(side="left", fill="y", padx=(0, 15))
-        
-        content = ctk.CTkFrame(card, fg_color="transparent")
-        content.pack(side="left", fill="both", expand=True, pady=10)
-        
-        top_row = ctk.CTkFrame(content, fg_color="transparent")
-        top_row.pack(fill="x", anchor="w")
-        ctk.CTkLabel(top_row, text=name, font=("Segoe UI", 15, "bold"),
-                     text_color=THEME["text_primary"], anchor="w").pack(side="left", padx=(0, 15))
-        ctk.CTkLabel(top_row, text=f"Class: {class_section}", font=("Segoe UI", 12),
-                     text_color=THEME["accent_blue"], fg_color=THEME["bg_tertiary"],
-                     corner_radius=6, padx=10, pady=3).pack(side="left")
-        
-        bottom_row = ctk.CTkFrame(content, fg_color="transparent")
-        bottom_row.pack(fill="x", anchor="w", pady=(5, 0))
-        for label, value in [("GR", grno), ("Roll", rollno), ("Date", date), ("Time", time)]:
-            detail = ctk.CTkFrame(bottom_row, fg_color="transparent")
-            detail.pack(side="left", padx=(0, 20))
-            ctk.CTkLabel(detail, text=f"{label}: ", font=("Segoe UI", 11),
-                         text_color=THEME["text_tertiary"]).pack(side="left")
-            ctk.CTkLabel(detail, text=str(value), font=("Segoe UI", 11, "bold"),
-                         text_color=THEME["text_secondary"]).pack(side="left")
-        
-        status_text = "✓ Present" if status == "P" else "✗ Absent"
-        ctk.CTkLabel(card, text=status_text, font=("Segoe UI", 13, "bold"), text_color="white",
-                     fg_color=status_color, corner_radius=8, padx=15, pady=8).pack(side="right", padx=15)
-    
-    def export_reports(self):
-        from_date = self.report_from_date.get().strip()
-        to_date = self.report_to_date.get().strip()
-        name = self.report_name.get().strip()
-        
-        records = self.db.get_attendance_reports(
-            from_date, to_date, 
-            f"%{name}%" if name else None
-        )
-        
-        if not records:
-            Toast(self, "No data to export", "warning")
-            return
-        
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv")],
-            initialfile=f"attendance_{datetime.date.today()}.csv"
-        )
-        
-        if filename:
-            success = self.backend.export_to_csv(
-                records,
-                ["Name", "GR No", "Roll No", "Class", "Date", "Time", "Status"], # column headers
-                filename
-            )
-            if success:
-                Toast(self, "Report exported successfully!", "success")
-            else:
-                Toast(self, "Export failed", "error")
+        hdr = self._header(page, "Reports", "Attendance data and analysis")
 
-    
+        # Filter card
+        filter_card = Card(page)
+        filter_card.pack(fill="x", padx=40, pady=(0, 20))
+        fr = ctk.CTkFrame(filter_card, fg_color="transparent")
+        fr.pack(fill="x", padx=20, pady=20)
+
+        # Name
+        col1 = ctk.CTkFrame(fr, fg_color="transparent")
+        col1.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        ctk.CTkLabel(col1, text="Student Name", font=SMALL, text_color=C["white"]).pack(anchor="w", pady=(0, 5))
+        self.rep_name = Field(col1, placeholder_text="Search by name")
+        self.rep_name.pack(fill="x")
+
+        # From date
+        col2 = ctk.CTkFrame(fr, fg_color="transparent")
+        col2.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        ctk.CTkLabel(col2, text="From", font=SMALL, text_color=C["white"]).pack(anchor="w", pady=(0, 5))
+        self.rep_from = Field(col2)
+        self.rep_from.insert(0, str(datetime.date.today() - datetime.timedelta(days=30)))
+        self.rep_from.pack(fill="x")
+
+        # To date
+        col3 = ctk.CTkFrame(fr, fg_color="transparent")
+        col3.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        ctk.CTkLabel(col3, text="To", font=SMALL, text_color=C["white"]).pack(anchor="w", pady=(0, 5))
+        self.rep_to = Field(col3)
+        self.rep_to.insert(0, str(datetime.date.today()))
+        self.rep_to.pack(fill="x")
+
+        # Action buttons
+        btn_col = ctk.CTkFrame(fr, fg_color="transparent")
+        btn_col.pack(side="left", padx=(0, 0), pady=(18, 0))
+        Btn(btn_col,      text="Generate",   width=110, command=self._gen_report).pack(pady=(0, 8))
+        GhostBtn(btn_col, text="⬇ Download", width=110, command=self._dl_report).pack()
+
+        # Results panel
+        self.rep_panel = Card(page)
+        self.rep_panel.pack(fill="both", expand=True, padx=40, pady=(0, 40))
+        self._report_placeholder()
+
+    def _report_placeholder(self):
+        for w in self.rep_panel.winfo_children(): w.destroy()
+        c = ctk.CTkFrame(self.rep_panel, fg_color="transparent")
+        c.place(relx=0.5, rely=0.5, anchor="center")
+        ctk.CTkLabel(c, text="📋", font=("Segoe UI", 60)).pack(pady=(0, 15))
+        ctk.CTkLabel(c, text="Set filters above and press Generate",
+                     font=BODY, text_color=C["muted"]).pack()
+
+    def _gen_report(self):
+        nm   = self.rep_name.get().strip()
+        recs = self.db.get_attendance_reports(
+            self.rep_from.get(), self.rep_to.get(), nm or None
+        )
+        for w in self.rep_panel.winfo_children(): w.destroy()
+
+        top = ctk.CTkFrame(self.rep_panel, fg_color="transparent")
+        top.pack(fill="x", padx=20, pady=15)
+        ctk.CTkLabel(top, text=f"{len(recs)} record(s) found", font=HEAD, text_color=C["white"]).pack(side="left")
+
+        scroll = ctk.CTkScrollableFrame(self.rep_panel, fg_color="transparent")
+        scroll.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        if not recs:
+            ctk.CTkLabel(scroll, text="No records match your filters.", text_color=C["muted"]).pack(pady=40)
+            return
+
+        for name, grno, rollno, cls, date, time, status in recs:
+            row = Card(scroll, height=60)
+            row.pack(fill="x", pady=4, padx=5)
+            col = C["green"] if status == "P" else C["red"]
+            ctk.CTkFrame(row, fg_color=col, width=4, corner_radius=4).pack(side="left", fill="y")
+            ctk.CTkLabel(row, text=name,           font=BOLD,  text_color=C["white"], width=160, anchor="w").pack(side="left", padx=12)
+            ctk.CTkLabel(row, text=f"Class {cls}", font=SMALL, text_color=C["muted"], width=80,  anchor="w").pack(side="left")
+            ctk.CTkLabel(row, text=f"{date}  {time}", font=SMALL, text_color=C["muted"], width=150, anchor="w").pack(side="left")
+            ctk.CTkLabel(row, text="Present" if status == "P" else "Absent",
+                         font=BOLD, text_color=col).pack(side="right", padx=20)
+
+    def _dl_report(self):
+        nm   = self.rep_name.get().strip() if hasattr(self, "rep_name") else ""
+        recs = self.db.get_attendance_reports(
+            self.rep_from.get(), self.rep_to.get(), nm or None
+        )
+        if not recs: return Toast(self, "Nothing to download", "warning")
+        fn = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv")])
+        if fn:
+            ok = self.bk.export_to_csv(recs, ["Name","GR","Roll","Class","Date","Time","Status"], fn)
+            Toast(self, "Downloaded!" if ok else "Export failed", "success" if ok else "error")
+
+    # ── Classes ───────────────────────────────────────────────────────────────
+
     def show_classes(self):
-        self.clear_content()
-        self.set_active_nav("Classes")
-        
-        # Header
-        header = ctk.CTkFrame(self.content_area, fg_color="transparent", height=80)
-        header.pack(fill="x", padx=30, pady=20)
-        
-        ctk.CTkLabel(
-            header,
-            text="🏫 Class Management",
-            font=("Segoe UI", 32, "bold"),
-            text_color=THEME["text_primary"],
-        ).pack(side="left")
-        
-        ModernButton(
-            header,
-            text="➕ Add Class",
-            fg_color=THEME["accent_purple"],
-            hover_color=THEME["accent_blue"],
-            command=self.show_add_class_inline,
-        ).pack(side="right")
-        
-        # List frame
-        list_frame = ModernCard(self.content_area)
-        list_frame.pack(fill="both", expand=True, padx=30, pady=(0, 30))
-        
-        self.classes_list_frame = list_frame
-        self.classes_form_frame = None
-        
-        # Scrollable container
-        self.classes_container = ctk.CTkScrollableFrame(
-            list_frame,
-            fg_color="transparent"
-        )
-        self.classes_container.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        self.load_classes()
+        self._clear()
+        self._nav("Classes")
+        page = self._page()
 
-    def load_classes(self):
-        for widget in self.classes_container.winfo_children():
-            widget.destroy()
-        
+        hdr = self._header(page, "Classes", "Manage class batches")
+        Btn(hdr, text="+ Add Class", width=130, command=self._add_class_form).pack(side="right")
+
+        self.cls_wrap = Card(page)
+        self.cls_wrap.pack(fill="both", expand=True, padx=40, pady=(0, 40))
+        self.cls_scroll = ctk.CTkScrollableFrame(self.cls_wrap, fg_color="transparent")
+        self.cls_scroll.pack(fill="both", expand=True, padx=10, pady=10)
+        self._render_classes()
+
+    def _render_classes(self):
+        for w in self.cls_scroll.winfo_children(): w.destroy()
         classes = self.db.get_classes_detailed()
-        
         if not classes:
-            ctk.CTkLabel(
-                self.classes_container,
-                text="No classes found",
-                font=("Segoe UI", 16),
-                text_color=THEME["text_tertiary"]
-            ).pack(pady=40)
+            ctk.CTkLabel(self.cls_scroll, text="No classes yet. Create one!",
+                         text_color=C["muted"]).pack(pady=40)
             return
-        
-        for class_data in classes:
-            self.create_class_card(class_data)
+        for cid, name, desc, _, count in classes:
+            row = Card(self.cls_scroll, height=75)
+            row.pack(fill="x", pady=5, padx=5)
+            ib = ctk.CTkFrame(row, fg_color=C["border"], width=46, height=46, corner_radius=10)
+            ib.pack(side="left", padx=15, pady=15)
+            ib.pack_propagate(False)
+            ctk.CTkLabel(ib, text="🏫", text_color=C["muted"]).pack(expand=True)
+            info = ctk.CTkFrame(row, fg_color="transparent")
+            info.pack(side="left", fill="both", expand=True, pady=15)
+            ctk.CTkLabel(info, text=name,              font=BOLD,  text_color=C["white"], anchor="w").pack(anchor="w")
+            ctk.CTkLabel(info, text=desc or "No description", font=SMALL, text_color=C["muted"], anchor="w").pack(anchor="w")
+            ctk.CTkLabel(row, text=f"👥 {count}", font=SMALL, text_color=C["muted"]).pack(side="left", padx=15)
+            GhostBtn(row, text="Delete", width=75, height=30, text_color=C["red"], border_color=C["red"],
+                     command=lambda c=cid, n=name: self._del_class(c, n)).pack(side="right", padx=15)
 
-    def create_class_card(self, class_data):
-        cid, name, description, created_at, student_count = class_data
-        
-        card = ctk.CTkFrame(self.classes_container, fg_color=THEME["card_bg"], corner_radius=12, height=100)
-        card.pack(fill="x", pady=5, padx=5)
-        
-        icon_frame = ctk.CTkFrame(card, fg_color=THEME["bg_tertiary"], width=80, height=80, corner_radius=10)
-        icon_frame.pack(side="left", padx=15, pady=10)
-        icon_frame.pack_propagate(False)
-        ctk.CTkLabel(icon_frame, text="🏫", font=("Segoe UI", 36)).pack(expand=True)
-        
-        info_frame = ctk.CTkFrame(card, fg_color="transparent")
-        info_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
-        ctk.CTkLabel(info_frame, text=name, font=("Segoe UI", 16, "bold"),
-                     text_color=THEME["text_primary"], anchor="w").pack(anchor="w")
-        ctk.CTkLabel(info_frame, text=description or "No description", font=("Segoe UI", 12),
-                     text_color=THEME["text_secondary"], anchor="w").pack(anchor="w", pady=2)
-        
-        actions = ctk.CTkFrame(card, fg_color="transparent")
-        actions.pack(side="right", padx=15)
-        
-        # student_count comes pre-joined from get_classes_detailed — no extra query needed
-        ctk.CTkLabel(
-            actions,
-            text=f"{student_count} students",
-            font=("Segoe UI", 13, "bold"),
-            text_color=THEME["accent_blue"],
-            fg_color=THEME["bg_tertiary"],
-            corner_radius=8,
-            padx=12,
-            pady=6
-        ).pack(pady=5)
-        ModernButton(
-                card,
-                text="Delete",
-                width=80,
-                height=35,
-                fg_color=THEME["danger"],
-                hover_color=THEME["warning"],
-                command=lambda c_id=cid, c_name=name: self.delete_class(c_id, c_name),
-            ).pack(side="right", padx=10)
-            
-    def show_add_class_inline(self):
-        # Clear content area
-        for widget in self.classes_list_frame.winfo_children():
-            widget.destroy()
-        
-        # Create form container
-        self.classes_form_frame = ModernCard(self.classes_list_frame)
-        self.classes_form_frame.pack(fill="both", expand=True, padx=20, pady=20)
-        
-        # Header
-        ctk.CTkLabel(
-            self.classes_form_frame,
-            text="➕ Add New Class",
-            font=("Segoe UI", 24, "bold"),
-            text_color=THEME["accent_purple"]
-        ).pack(pady=(20, 30))
-        
-        # Form fields
-        form_container = ctk.CTkFrame(self.classes_form_frame, fg_color="transparent")
-        form_container.pack(fill="both", expand=True, padx=40)
-        
-        # Class Name
-        ctk.CTkLabel(
-            form_container,
-            text="Class/Batch Name *",
-            font=("Segoe UI", 14, "bold"),
-            text_color=THEME["text_primary"]
-        ).pack(anchor="w", pady=(10, 5))
-        
-        name_entry = ModernEntry(form_container, placeholder_text="e.g., 10-A, 12-Science, Batch-2025")
-        name_entry.pack(fill="x", pady=(0, 20))
-        
-        # Description
-        ctk.CTkLabel(
-            form_container,
-            text="Description (Optional)",
-            font=("Segoe UI", 14, "bold"),
-            text_color=THEME["text_primary"]
-        ).pack(anchor="w", pady=(10, 5))
-        
-        desc_entry = ctk.CTkTextbox(
-            form_container,
-            height=100,
-            fg_color=THEME["card_bg"],
-            border_width=2,
-            border_color=THEME["border"],
-            corner_radius=8,
-            font=("Segoe UI", 14)
-        )
-        desc_entry.pack(fill="x", pady=(0, 30))
-        
-        # Buttons
-        btn_frame = ctk.CTkFrame(form_container, fg_color="transparent")
-        btn_frame.pack(fill="x", pady=20)
-        
-        def save_class():
-            name = name_entry.get().strip()
-            description = desc_entry.get("1.0", "end-1c").strip()
-            
-            if not name:
-                Toast(self, "Please enter a class name!", "error")
-                return
-            
-            try:
-                self.db.add_class(name, description)
-                Toast(self, f"Class '{name}' added successfully!", "success")
-                self.show_classes()  # Reload the classes view
-            except Exception as e:
-                Toast(self, f"Error: {str(e)}", "error")
-        
-        def cancel():
-            self.show_classes()
-        
-        ModernButton(
-            btn_frame,
-            text="💾 Save Class",
-            fg_color=THEME["accent_purple"],
-            hover_color=THEME["accent_blue"],
-            command=save_class,
-            width=160,
-            height=45
-        ).pack(side="right", padx=5)
-        
-        ModernButton(
-            btn_frame,
-            text="✖ Cancel",
-            fg_color=THEME["card_bg"],
-            hover_color=THEME["card_hover"],
-            command=cancel,
-            width=120,
-            height=45
-        ).pack(side="right", padx=5)
-        
-    def delete_class(self, class_id, name):
-        result = messagebox.askyesno(
-            "Confirm Delete",
-            f"Are you sure you want to delete class {name}?\nThis cannot be undone."
-        )
-        if not result:
-            return
+    def _add_class_form(self):
+        for w in self.cls_wrap.winfo_children(): w.destroy()
+        c = ctk.CTkFrame(self.cls_wrap, fg_color="transparent")
+        c.place(relx=0.5, rely=0.5, anchor="center")
+
+        ctk.CTkLabel(c, text="Add New Class", font=HEAD, text_color=C["white"]).pack(pady=(0, 20))
+
+        row1 = ctk.CTkFrame(c, fg_color="transparent")
+        row1.pack(pady=(0, 12))
+        ctk.CTkLabel(row1, text="Class  ", font=BOLD, text_color=C["muted"]).pack(side="left")
+        self.cls_num_entry = Field(row1, placeholder_text="e.g. 10", width=140)
+        self.cls_num_entry.pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(row1, text="Section  ", font=BOLD, text_color=C["muted"]).pack(side="left")
+        self.cls_sec_entry = Field(row1, placeholder_text="e.g. A", width=80)
+        self.cls_sec_entry.pack(side="left")
+
+        self.cls_desc_entry = Field(c, placeholder_text="Description (optional)", width=300)
+        self.cls_desc_entry.pack(pady=(0, 20))
+
+        btns = ctk.CTkFrame(c, fg_color="transparent")
+        btns.pack()
+        Btn(btns,      text="Save",   width=120, command=self._save_class).pack(side="left", padx=5)
+        GhostBtn(btns, text="Cancel", width=100, command=self.show_classes).pack(side="left", padx=5)
+
+    def _save_class(self):
+        num = self.cls_num_entry.get().strip()
+        sec = self.cls_sec_entry.get().strip().upper()
+        if not num: return Toast(self, "Class number is required", "error")
+        name = f"Class {num}" + (f" - {sec}" if sec else "")
         try:
-            self.db.delete_class(class_id)
-            Toast(self, f"Class {name} deleted successfully!", "success")
-            self.load_classes()
-        except Exception as e:
-            Toast(self, f"Error: {str(e)}", "error")
+            self.db.add_class(name, self.cls_desc_entry.get().strip())
+            Toast(self, f"'{name}' created", "success")
+            self.show_classes()
+        except Exception as ex:
+            Toast(self, str(ex), "error")
 
-    
+    def _del_class(self, cid, name):
+        if messagebox.askyesno("Delete Class", f"Delete '{name}'?"):
+            try:
+                self.db.delete_class(cid)
+                Toast(self, f"'{name}' deleted", "success")
+                self._render_classes()
+            except Exception as ex:
+                Toast(self, str(ex), "error")
+
+    # ── Settings ──────────────────────────────────────────────────────────────
+
     def show_settings(self):
-        self.clear_content()
-        self.set_active_nav("Settings")
-        
-        # Header
-        header = ctk.CTkFrame(self.content_area, fg_color="transparent", height=80)
-        header.pack(fill="x", padx=30, pady=20)
-        
-        ctk.CTkLabel(
-            header,
-            text="⚙️ Settings",
-            font=("Segoe UI", 32, "bold"),
-            text_color=THEME["text_primary"],
-        ).pack(side="left")
-        
-        # Settings card
-        settings_card = ModernCard(self.content_area)
-        settings_card.pack(fill="both", expand=True, padx=30, pady=(0, 30))
-        
-        # --- BUG FIX 2: Retrieve DB_PATH directly from the imported db module ---
-        # We try to get it from self.db.DB_PATH, fallback to config if missing
-        actual_db_path = getattr(self.db, 'DB_PATH', self.config.get("db_path", "N/A"))
-        
-        self.create_setting_item(
-            settings_card,
-            "📁 Database Path",
-            actual_db_path,
-            "Location of the attendance database file"
-        )
-        # ------------------------------------------------------------------------
-        
-        # Face dataset path
-        self.create_setting_item(
-            settings_card,
-            "👤 Face Dataset Path",
-            self.config.get("dataset_dir", "N/A"),
-            "Location where face recognition data is stored"
-        )
-        
-        # Camera index
-        self.create_setting_item(
-            settings_card,
-            "🎥 Camera Index",
-            str(self.config.get("camera_index", 0)),
-            "Camera device index (usually 0 for default camera)"
-        )
-        
-        # Recognition threshold
-        self.create_setting_item(
-            settings_card,
-            "🎯 Recognition Threshold",
-            str(self.config.get("recognition_threshold", 0.6)),
-            "Confidence threshold for face recognition (0.0 - 1.0)"
-        )
-        
-        # App info
-        info_frame = ctk.CTkFrame(settings_card, fg_color=THEME["bg_tertiary"], corner_radius=10)
-        info_frame.pack(fill="x", padx=20, pady=20)
-        
-        ctk.CTkLabel(
-            info_frame,
-            text=f"ℹ️ {APP_NAME} v{VERSION}",
-            font=("Segoe UI", 16, "bold"),
-            text_color=THEME["text_primary"]
-        ).pack(pady=10)
-        
-        ctk.CTkLabel(
-            info_frame,
-            text="Modern Face Recognition Attendance System",
-            font=("Segoe UI", 12),
-            text_color=THEME["text_secondary"]
-        ).pack(pady=5)
-        
-        ctk.CTkLabel(
-            info_frame,
-            text="© 2025 AttendancePro. All rights reserved.",
-            font=("Segoe UI", 11),
-            text_color=THEME["text_tertiary"]
-        ).pack(pady=(0, 10))
+        self._clear()
+        self._nav("Settings")
+        page = self._page()
 
-    def create_setting_item(self, parent, title, value, description):
-        item_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        item_frame.pack(fill="x", padx=20, pady=15)
-        
-        ctk.CTkLabel(
-            item_frame,
-            text=title,
-            font=("Segoe UI", 15, "bold"),
-            text_color=THEME["text_primary"]
-        ).pack(anchor="w")
-        
-        ctk.CTkLabel(
-            item_frame,
-            text=value,
-            font=("Segoe UI", 12),
-            text_color=THEME["accent_blue"]
-        ).pack(anchor="w", pady=2)
-        
-        ctk.CTkLabel(
-            item_frame,
-            text=description,
-            font=("Segoe UI", 11),
-            text_color=THEME["text_tertiary"]
-        ).pack(anchor="w")
+        hdr = self._header(page, "Settings", "System configuration")
+
+        # Config items
+        config_card = Card(page)
+        config_card.pack(fill="x", padx=40, pady=(0, 20))
+        dbp = getattr(self.db, "DB_PATH", self.cfg.get("db_path", "N/A"))
+        items = [
+            ("📁  Database",         dbp,                                              "SQLite database file location"),
+            ("👤  Face Dataset",      self.cfg.get("dataset_dir", "N/A"),              "Training images directory"),
+            ("🎥  Camera Index",      str(self.cfg.get("camera_index", 0)),            "Webcam device index (0 = default)"),
+            ("🎯  Match Threshold",   str(self.cfg.get("recognition_threshold", 0.6)), "Face confidence threshold (0–1)"),
+        ]
+        for title, value, desc in items:
+            row = ctk.CTkFrame(config_card, fg_color="transparent")
+            row.pack(fill="x", padx=25, pady=14)
+            ctk.CTkLabel(row, text=title, font=BOLD,  text_color=C["white"]).pack(anchor="w")
+            ctk.CTkLabel(row, text=value, font=SMALL, text_color=C["purple"]).pack(anchor="w", pady=2)
+            ctk.CTkLabel(row, text=desc,  font=TINY,  text_color=C["muted"]).pack(anchor="w")
+            ctk.CTkFrame(config_card, fg_color=C["border"], height=1).pack(fill="x", padx=25)
+
+        # About
+        about = Card(page)
+        about.pack(fill="x", padx=40, pady=(0, 40))
+        ctk.CTkLabel(about, text=APP, font=("Segoe UI", 18, "bold"), text_color=C["white"]).pack(pady=(24, 4))
+        ctk.CTkLabel(about, text=f"v{VER}", font=SMALL, text_color=C["purple"]).pack()
+        ctk.CTkLabel(about, text="Face Recognition Attendance System", font=BODY, text_color=C["muted"]).pack(pady=4)
+        ctk.CTkLabel(about, text="Built with Python · CustomTkinter · OpenCV · SQLite",
+                     font=TINY, text_color=C["muted"]).pack(pady=(0, 24))
