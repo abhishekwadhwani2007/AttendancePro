@@ -21,32 +21,32 @@ The current app version is **v2.5**. It keeps the full workflow local: student r
 ### 1. Dashboard Overview
 Central command center displaying total student counts, daily attendance metrics, and quick access shortcuts.
 
-![Dashboard](screenshots/Screen%201%20-%20Dashboard.png)
+![Dashboard](screenshots/Screen%201%20-%20Dashboard.png?v=2.5)
 
 ### 2. Student Records
 Directory for browsing, searching, and managing registered students across all classes.
 
-![Student Records](screenshots/Screen%202%20-%20Student%20Records.png)
+![Student Records](screenshots/Screen%202%20-%20Student%20Records.png?v=2.5)
 
 ### 3. Face Recognition Attendance
 Real-time webcam interface featuring automated face detection, instant matching, and audio confirmations.
 
-![Attendance](screenshots/Screen%203%20-%20Attendance.png)
+![Attendance](screenshots/Screen%203%20-%20Attendance.png?v=2.5)
 
 ### 4. Reports & Analytics
 Filterable attendance logs with date ranges and one-click export to CSV for administrative record-keeping.
 
-![Reports](screenshots/Screen%204%20-%20Reports.png)
+![Reports](screenshots/Screen%204%20-%20Reports.png?v=2.5)
 
 ### 5. Classes Management
 Academic batch organization to create and structure classes and sections.
 
-![Classes Management](screenshots/Screen%205%20-%20Classes%20Management.png)
+![Classes Management](screenshots/Screen%205%20-%20Classes%20Management.png?v=2.5)
 
 ### 6. Settings & Location
 System configuration panel for camera selection, detection sensitivity, and campus location controls.
 
-![Settings and Location](screenshots/Screen%206%20-%20Settings%20and%20Location.png)
+![Settings and Location](screenshots/Screen%206%20-%20Settings%20and%20Location.png?v=2.5)
 
 ## What It Does
 
