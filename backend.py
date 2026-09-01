@@ -117,6 +117,30 @@ def speak(text):
         pass
 
 
+def speak_async(text):
+    """Speak without blocking the calling thread.
+    Creates a fresh pyttsx3 engine inside the thread — required because
+    the Windows SAPI5 backend is not thread-safe across engine instances."""
+    import threading
+    def _run():
+        try:
+            engine = pyttsx3.init()
+            voices = engine.getProperty("voices") or []
+            chosen = next(
+                (v for v in voices if _PREFERRED_VOICE_KEYWORD in v.name.lower()),
+                voices[0] if voices else None,
+            )
+            if chosen:
+                engine.setProperty("voice", chosen.id)
+            engine.setProperty("rate",   _TTS_RATE)
+            engine.setProperty("volume", _TTS_VOLUME)
+            engine.say(str(text))
+            engine.runAndWait()
+            engine.stop()
+        except Exception:
+            pass
+    threading.Thread(target=_run, daemon=True).start()
+
 
 def distance(v1, v2):
     return np.sqrt(((v1 - v2) ** 2).sum())
@@ -182,7 +206,9 @@ def _draw_rounded_rect(img, pt1, pt2, color, thickness, r=12):
 
 
 def _apply_dark_titlebar(window_name):
-    """Turn the Windows title bar dark using the DWM API."""
+    """Turn the Windows title bar dark using the DWM API, and bring the
+    OpenCV window to the foreground so keyboard input (Q, M, S, etc.)
+    is captured correctly when launched from a Tkinter parent window."""
     try:
         import ctypes
         hwnd = ctypes.windll.user32.FindWindowW(None, window_name)
@@ -191,15 +217,19 @@ def _apply_dark_titlebar(window_name):
             ctypes.windll.dwmapi.DwmSetWindowAttribute(
                 hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
                 ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int))
+            # Force keyboard focus to the OpenCV window so that
+            # cv2.waitKey() receives key events reliably on Windows.
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+            ctypes.windll.user32.SetFocus(hwnd)
     except Exception:
         pass
 
 
 def record_face(name, samples=50):
-    speak(f"Recording face for {name}")
+    speak_async(f"Recording face for {name}")
 
     # OpenCV uses BGR color order.
-    PURPLE    = (246, 92, 139)   # #8B5CF6
+    PURPLE    = (180, 60, 110)   # medium purple – visible on any background
     DARK_CARD = (19, 17, 17)     # #111113
     WHITE     = (252, 250, 248)  # #F8FAFC
     MUTED     = (184, 163, 148)  # #94A3B8
@@ -281,7 +311,7 @@ def record_face(name, samples=50):
                 cv2.putText(frame, "Please position your face in front of the camera", (15, h_frame - 40),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.58, RED, 1)
 
-            cv2.putText(frame, "S - Save early     Q - Cancel", (15, h_frame - 18),
+            cv2.putText(frame, "Q - Cancel", (15, h_frame - 18),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, WHITE, 2)
 
             cv2.imshow(window_name, frame)
@@ -289,9 +319,7 @@ def record_face(name, samples=50):
                 _apply_dark_titlebar(window_name)
                 first_frame = False
             key = cv2.waitKey(1) & 0xFF
-            if key == ord('s') and len(face_data) > 0:
-                saved = True; break
-            elif key == ord('q'):
+            if key == ord('q'):
                 saved = False; break
             try:
                 if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
@@ -326,10 +354,10 @@ def recognize_and_mark_attendance(db_module):
     names, trainset = loaded
     current_date = str(datetime.date.today())
     marked_students = []
-    speak("Taking Attendance")
+    speak_async("Taking Attendance")
 
     # OpenCV uses BGR color order.
-    PURPLE    = (246, 92, 139)
+    PURPLE    = (180, 60, 110)   # medium purple – visible on any background
     DARK_CARD = (19, 17, 17)
     WHITE     = (252, 250, 248)
     MUTED     = (184, 163, 148)
@@ -421,14 +449,14 @@ def recognize_and_mark_attendance(db_module):
                     current_time = datetime.datetime.now().strftime("%H:%M:%S")
                     if not db_module.check_attendance_exists(sid, current_date):
                         db_module.mark_attendance(sid, current_date, current_time, "P")
-                        speak(f"{matched_name} Present")
+                        speak_async(f"{matched_name} Present")
                         marked_students.append(matched_name)
                         last_marked  = matched_name
                         status_msg   = f"Marked present: {matched_name}"
                         status_color = GREEN
                         msg_timer    = 90
                     else:
-                        speak(f"{matched_name} already marked")
+                        speak_async(f"{matched_name} already marked")
                         status_msg   = f"Already marked: {matched_name}"
                         status_color = ORANGE
                         msg_timer    = 90
