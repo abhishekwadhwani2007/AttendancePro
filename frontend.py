@@ -3,6 +3,7 @@
 
 import csv
 import datetime
+import os
 import re
 import tkinter as tk
 import customtkinter as ctk
@@ -36,7 +37,7 @@ TINY  = ("Segoe UI", 10)
 
 
 def _tint(hex_color, alpha=0.15, bg="#111113"):
-    """Blend a colour at given opacity over the card background."""
+    """Blend a colour at a given opacity over the card background."""
     r1, g1, b1 = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
     r2, g2, b2 = int(bg[1:3], 16),        int(bg[3:5], 16),        int(bg[5:7], 16)
     return "#{:02x}{:02x}{:02x}".format(
@@ -139,9 +140,21 @@ class AttendanceProApp(ctk.CTk):
         self.title(f"{APP} v{VER}")
         self.geometry("1400x900")
         self.configure(fg_color=C["sidebar"])
+        self._set_window_icon()
         self.protocol("WM_DELETE_WINDOW", self._quit)
         self._build()
         self.show_dashboard()
+
+    def _set_window_icon(self):
+        try:
+            bundle_dir = getattr(self.bk, "BUNDLE_DIR", getattr(self.bk, "BASE_DIR", "."))
+            icon_path = os.path.join(bundle_dir, "Logo.ico")
+            if not os.path.exists(icon_path):
+                icon_path = os.path.join(getattr(self.bk, "BASE_DIR", "."), "Logo.ico")
+            if os.path.exists(icon_path):
+                self.iconbitmap(icon_path)
+        except Exception:
+            pass
 
     def _quit(self):
         try:

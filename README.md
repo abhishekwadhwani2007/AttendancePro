@@ -1,5 +1,17 @@
 # AttendancePro
 
+<p align="center">
+  <a href="https://github.com/abhishekwadhwani2007/AttendancePro/releases/download/v2.5.0/AttendancePro_v2.5.exe">
+    <img src="https://img.shields.io/badge/Download-Standalone%20Windows%20.exe%20(v2.5.0)-8B5CF6?style=for-the-badge&logo=windows&logoColor=white" alt="Download Standalone .exe" />
+  </a>
+  <a href="https://github.com/abhishekwadhwani2007/AttendancePro/releases/tag/v2.5.0">
+    <img src="https://img.shields.io/badge/Release-v2.5.0-blue?style=for-the-badge" alt="GitHub Release v2.5.0" />
+  </a>
+</p>
+
+> [!TIP]
+> **Zero-Install One-Click Download**: You don't need Python or dependencies installed! Simply **[Download AttendancePro_v2.5.exe](https://github.com/abhishekwadhwani2007/AttendancePro/releases/download/v2.5.0/AttendancePro_v2.5.exe)** and double-click to run. All AI models, icons, and UI assets are fully bundled.
+
 AttendancePro is a local desktop attendance management app built with Python, CustomTkinter, OpenCV, and SQLite. It helps schools or coaching classes register students, capture face data through a webcam, and mark daily attendance with face recognition.
 
 The current app version is **v2.5**. It keeps the full workflow local: student records, attendance logs, app settings, and face samples stay on the user's machine. That makes the project easy to run for learning, demos, and small classroom setups without requiring a hosted backend or paid services.
@@ -177,15 +189,55 @@ AttendancePro is designed as a local-first desktop app. It does not require API 
 
 Because the project handles student data and face samples, keep local runtime files private and out of version control. Review `.gitignore` before publishing or packaging the app.
 
-## Roadmap
+## Upcoming Update: Role-Based Access Control (RBAC) & Institutional Hierarchy
 
-The next development phase will focus on making the app easier to test, package, and maintain while improving recognition reliability and UI responsiveness.
+To support structured academic administration across schools, colleges, and coaching institutions, the upcoming update introduces a comprehensive 3-tier Role-Based Access Control (RBAC) system:
 
-Planned directions include:
+```mermaid
+graph TD
+    SuperAdmin["👑 Super Admin\n(Principal / IT Department)"] -->|Manages & Provisions| Admin["🧑‍🏫 Admin\n(Faculty / Class Teachers)"]
+    Admin -->|Records & Enrolls| User["🎓 User\n(Students / Parents)"]
+    SuperAdmin -.->|System Backups & Global Settings| GlobalConfig[("Global Configuration & Audit Logs")]
+    Admin -.->|Class Attendance & Reports| ClassData[("Class & Batch Attendance")]
+    User -.->|Read-Only Inspection| StudentPortal[("Self-Service Portal (View-Only)")]
+```
 
-- Cleaner service boundaries between UI, database, and recognition logic
-- Stronger form validation and clearer error states
-- Better model/data management for face recognition
-- Automated tests for database and attendance workflows
-- Packaged desktop releases with a smoother setup experience
-- Optional architecture improvements for larger deployments
+### 1. Super Admin (Principal / Computer & IT Department)
+* **Full Institutional Governance**: Central authority over global configurations, camera hardware calibration, database migrations, and disaster-recovery backups.
+* **Faculty & Role Provisioning**: Creates faculty credentials, assigns teachers to designated grade levels/sections, and manages institutional academic terms.
+* **Institution-Wide Auditing**: Access to comprehensive audit logs, cross-class attendance trends, anomaly detection (e.g. repeated unexcused absences), and master administrative overrides.
+
+### 2. Admin (Teachers / Faculty)
+* **Classroom Attendance Operations**: Initiates webcam facial recognition sessions for assigned class batches and manages instant present/absent tagging.
+* **Student Onboarding**: Captures and validates multi-angle webcam face samples for new student registrations.
+* **Scoped Class Analytics**: Generates, inspects, and exports date-range attendance summaries (CSV/PDF) strictly for the classes and sections under their charge, preventing cross-classroom interference.
+
+### 3. User (Students / Parents)
+* **Transparent Self-Service Portal**: Allows students and parents to review personal daily attendance history, aggregate monthly percentages, and monitor minimum attendance thresholds (e.g. 75% examination eligibility).
+* **Guaranteed Tamper-Proof Read-Only Access**: Strict read-only permissions prevent students from modifying logs, deleting records, or tampering with database entries. This guarantees complete record integrity, accountability, and institutional trust.
+
+---
+
+## Long-Term Technical Roadmap (Modern Architecture)
+
+AttendancePro is evolving from a local desktop utility into a scalable, high-performance edge attendance ecosystem. The technical roadmap focuses on five core engineering pillars:
+
+### 1. Advanced Deep Learning & Liveness Detection
+* **State-of-the-Art Embedding Models**: Transitioning from OpenCV Haar cascades + k-NN to lightweight deep face recognition embeddings (e.g., InsightFace / MobileFaceNet / FaceNet) for significantly higher precision under varying classroom lighting and angles.
+* **Anti-Spoofing & Liveness Verification**: Incorporating optical flow, blink detection, and 3D texture analysis to prevent spoofing attempts via printed photographs or smartphone screens.
+
+### 2. Edge-to-Cloud Hybrid Data Synchronization
+* **Local-First Reliability with Edge Sync**: Preserving fast, offline-capable SQLite operations locally at the edge, while introducing asynchronous background sync to cloud PostgreSQL / Supabase backends.
+* **Multi-Terminal Fleet Synchronization**: Enabling multiple classroom gates, labs, and attendance terminals across a campus to seamlessly aggregate into a unified central database.
+
+### 3. Decoupled Service Architecture & Cross-Platform UI
+* **FastAPI Microservices Core**: Decoupling recognition inference and database logic behind high-throughput, async REST/WebSocket APIs.
+* **Multi-Platform Client Fleet**: Supporting responsive web dashboards for administrators and lightweight mobile/tablet kiosks for classroom doors and student check-ins.
+
+### 4. Automated Communication & Notification Gateways
+* **Real-Time Absence Alerts**: Automated dispatch of instant notifications via WhatsApp Business API, SMS, and SMTP email to parents whenever a student is marked absent or arrives late.
+* **Weekly Automated Summaries**: Periodic attendance digest delivery for academic counselors and parents.
+
+### 5. Automated CI/CD & Automated Code Signing
+* **GitHub Actions Pipeline**: Automated multi-platform build testing, matrix dependency checks, and PyInstaller artifact builds on every release tag.
+* **Cryptographic Verification**: Automated SHA-256 checksum generation and Windows Authenticode binary signing for safe, warning-free downloads.

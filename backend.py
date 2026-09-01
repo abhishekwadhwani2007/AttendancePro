@@ -11,12 +11,20 @@ import re
 # Base paths
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
+    BUNDLE_DIR = getattr(sys, '_MEIPASS', BASE_DIR)
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    BUNDLE_DIR = BASE_DIR
 
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 DATASET_DIR = os.path.join(BASE_DIR, "face_dataset")
-HAARCASCADE_PATH = os.path.join(BASE_DIR, "haarcascade_frontalface_default.xml")
+
+# Locate Haar Cascade (bundled asset takes precedence, fallback to BASE_DIR)
+bundled_cascade = os.path.join(BUNDLE_DIR, "haarcascade_frontalface_default.xml")
+if os.path.exists(bundled_cascade):
+    HAARCASCADE_PATH = bundled_cascade
+else:
+    HAARCASCADE_PATH = os.path.join(BASE_DIR, "haarcascade_frontalface_default.xml")
 
 def check_and_download_haarcascade(target_path):
     if not os.path.exists(target_path):
@@ -74,13 +82,9 @@ def get_camera_index():
 
 
 # ── Text-to-Speech ─────────────────────────────────────────────────────────────
-# Preferred voice: Microsoft Zira (soft, clear female voice on Windows).
-# We reinitialise properties inside speak() to avoid the Windows SAPI5 bug
-# where properties set at module load are silently ignored on first use.
-
-_PREFERRED_VOICE_KEYWORD = "zira"   # fallback to first available if not found
-_TTS_RATE   = 140                   # words per minute — natural, unhurried pace
-_TTS_VOLUME = 0.92                  # slightly under full to avoid harshness
+_PREFERRED_VOICE_KEYWORD = "zira"   # falls back to first available voice if not found
+_TTS_RATE   = 140                   # words per minute
+_TTS_VOLUME = 0.92
 
 try:
     tts_engine  = pyttsx3.init()
@@ -91,7 +95,7 @@ except Exception:
 
 
 def _configure_tts():
-    """Apply voice, rate and volume — called fresh each time to beat SAPI5 caching."""
+    """Apply voice, rate, and volume on each call."""
     if not tts_engine:
         return
     voices = tts_engine.getProperty("voices") or []
@@ -118,9 +122,8 @@ def speak(text):
 
 
 def speak_async(text):
-    """Speak without blocking the calling thread.
-    Creates a fresh pyttsx3 engine inside the thread — required because
-    the Windows SAPI5 backend is not thread-safe across engine instances."""
+    """Run TTS in a background thread so the UI stays responsive.
+    A new engine is created per call since pyttsx3 is not thread-safe."""
     import threading
     def _run():
         try:
@@ -217,8 +220,6 @@ def _apply_dark_titlebar(window_name):
             ctypes.windll.dwmapi.DwmSetWindowAttribute(
                 hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
                 ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int))
-            # Force keyboard focus to the OpenCV window so that
-            # cv2.waitKey() receives key events reliably on Windows.
             ctypes.windll.user32.SetForegroundWindow(hwnd)
             ctypes.windll.user32.SetFocus(hwnd)
     except Exception:
@@ -228,8 +229,8 @@ def _apply_dark_titlebar(window_name):
 def record_face(name, samples=50):
     speak_async(f"Recording face for {name}")
 
-    # OpenCV uses BGR color order.
-    PURPLE    = (180, 60, 110)   # medium purple – visible on any background
+    # Colors are in BGR order (OpenCV convention).
+    PURPLE    = (180, 60, 110)
     DARK_CARD = (19, 17, 17)     # #111113
     WHITE     = (252, 250, 248)  # #F8FAFC
     MUTED     = (184, 163, 148)  # #94A3B8
@@ -254,7 +255,7 @@ def record_face(name, samples=50):
             ret, frame = cap.read()
             if not ret:
                 continue
-            frame = cv2.flip(frame, 1)  # mirror-fix: left↔right
+            frame = cv2.flip(frame, 1)  # horizontal mirror
 
             h_frame, w_frame = frame.shape[:2]
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -356,8 +357,8 @@ def recognize_and_mark_attendance(db_module):
     marked_students = []
     speak_async("Taking Attendance")
 
-    # OpenCV uses BGR color order.
-    PURPLE    = (180, 60, 110)   # medium purple – visible on any background
+    # Colors are in BGR order (OpenCV convention).
+    PURPLE    = (180, 60, 110)
     DARK_CARD = (19, 17, 17)
     WHITE     = (252, 250, 248)
     MUTED     = (184, 163, 148)
@@ -385,7 +386,7 @@ def recognize_and_mark_attendance(db_module):
             ret, frame = cap.read()
             if not ret:
                 continue
-            frame = cv2.flip(frame, 1)  # mirror-fix: left↔right
+            frame = cv2.flip(frame, 1)  # horizontal mirror
 
             h_frame, w_frame = frame.shape[:2]
             gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)

@@ -14,7 +14,6 @@ DB_PATH = os.path.join(BASE_DIR, "attendance.db")
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
-    # Keep the desktop UI responsive during repeated reads and writes.
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA cache_size = 10000")
     conn.execute("PRAGMA synchronous = NORMAL")

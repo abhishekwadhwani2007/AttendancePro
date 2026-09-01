@@ -17,3 +17,5 @@ dist/
 *.spec
 .idea/
 *.xml
+
+Logo.ico
